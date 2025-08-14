@@ -262,6 +262,26 @@ class LevelCanvas(Widget):
             for rx,ry,rw,rh in self.walls:
                 Rectangle(pos=(rx,ry), size=(rw,rh))
 
+            # Stairs
+            for r in self.stairs:
+                rx,ry,rw,rh = r["rect"]
+                steps = 6
+                if r["dir"] == "up":
+                    Color(0.8,0.8,0.8,1.0)
+                else:
+                    Color(0.4,0.4,0.4,1.0)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.3,0.3,0.3,1.0)
+                for i in range(steps):
+                    y = ry + (i/steps)*rh
+                    Line(points=[rx, y, rx+rw, y], width=1)
+
+            # Decor
+            # Walls
+            Color(0.25, 0.28, 0.33, 1.0)
+            for rx,ry,rw,rh in self.walls:
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+
             # Decor
             for d in self.decor:
                 kind = d["kind"]; rx,ry,rw,rh = d["rect"]
@@ -281,6 +301,12 @@ class LevelCanvas(Widget):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
                 elif kind == "plant":
+                    Color(0.22,0.55,0.25,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.3,0.28,0.22,1.0)
+                    Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.6,0.45,0.25,1.0)
                     Color(0.16,0.4,0.18,1.0)
                     Ellipse(pos=(rx,ry), size=(rw,rh))
                     Color(0.2,0.25,0.2,1.0)
@@ -292,6 +318,18 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
                     Color(0.2,0.2,0.2,1.0)
                     Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                    Color(0.35,0.35,0.35,1.0)
+                    Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.35,0.35,0.45,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.25,0.25,0.35,1.0)
+                    Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.55,0.42,0.28,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.4,0.32,0.22,1.0)
+                    Line(rectangle=(rx,ry,rw,rh), width=1.2)
                     Color(0.3,0.3,0.3,1.0)
                     Rectangle(pos=(rx+5, ry+10), size=(50,8))
                 elif kind == "chair":
@@ -337,13 +375,15 @@ class LevelCanvas(Widget):
                 end_ang = base_ang - fov_half
                 steps = 48
                 pts = []
+                collidable = {"plant","desk","chair","table"}
+                all_walls = self.walls + [d["rect"] for d in self.decor if d["kind"] in collidable]
                 for i in range(steps+1):
                     t = i/steps
                     ang = start_ang + (end_ang - start_ang)*t
                     dx,dy = cos(ang), sin(ang)
                     hit_pt = None; nearest_d2=None
                     tx,ty = ax + dx*cone_len, ay + dy*cone_len
-                    for rect in self.walls:
+                    for rect in all_walls:
                         pt = ray_rect_nearest_hit(ax, ay, dx, dy, rect)
                         if pt is not None:
                             d2 = (pt[0]-ax)**2 + (pt[1]-ay)**2
