@@ -899,6 +899,14 @@ from kivy.uix.gridlayout import GridLayout
 class StartMenuScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        with self.canvas.before:
+            self._bg_rect = Rectangle(
+                source=os.path.join("common", "assets", "menu_bg.png"),
+                pos=self.pos,
+                size=self.size,
+            )
+        self.bind(pos=self._update_bg_rect, size=self._update_bg_rect)
+
         layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
         play_btn = Button(text="Play", size_hint=(1, None), height=80)
         skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
@@ -907,6 +915,10 @@ class StartMenuScreen(Screen):
         layout.add_widget(play_btn)
         layout.add_widget(skins_btn)
         self.add_widget(layout)
+
+    def _update_bg_rect(self, *args):
+        self._bg_rect.pos = self.pos
+        self._bg_rect.size = self.size
 
 
 class SkinMenuScreen(Screen):
