@@ -319,6 +319,7 @@ class StealthGolf(Widget):
         self.walls = [tuple(r) for r in f.get("walls", [])]
         # Decor
         self.decor = []
+        collidable = {"plant", "desk", "chair", "table"}
         for d in f.get("decor", []):
             if isinstance(d, dict):
                 kind = d.get("kind", "")
@@ -327,6 +328,10 @@ class StealthGolf(Widget):
             elif isinstance(d, (list, tuple)) and len(d) == 2:
                 kind, rect = d
                 self.decor.append({"kind": kind, "rect": list(rect)})
+            else:
+                continue
+            if kind in collidable:
+                self.walls.append(tuple(rect))
         # Stairs
         self.stairs = []
         for s in f.get("stairs", []):
@@ -541,6 +546,20 @@ class StealthGolf(Widget):
                     for i in range(4):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
+                elif kind == "plant":
+                    Color(0.16,0.4,0.18,1); Ellipse(pos=(rx, ry), size=(rw, rh))
+                    Color(0.2,0.25,0.2,1); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.45,0.33,0.18,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.1,0.1,0.1,1); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
+                    Color(0.2,0.2,0.2,1); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                    Color(0.3,0.3,0.3,1); Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.25,0.25,0.3,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.15,0.15,0.2,1); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.4,0.3,0.2,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.3,0.22,0.15,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]
