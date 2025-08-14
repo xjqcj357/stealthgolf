@@ -37,6 +37,7 @@ class LevelCanvas(Widget):
         self.walls = []
         self.decor = []  # [{"kind":..., "rect":[x,y,w,h]}]
         self.agents = [] # [{"a":[x,y], "b":[x,y], "speed":..., "fov_deg":..., "cone_len":...}]
+        self.ramps = []  # [{"dir":"up"|"down", "rect":[x,y,w,h]}]
         self.start = [240, 220]
         self.hole = {"cx":1240, "cy":2020, "r":22}
         # Interaction
@@ -58,6 +59,7 @@ class LevelCanvas(Widget):
             "walls": self.walls,
             "decor": self.decor,
             "agents": self.agents,
+            "ramps": self.ramps,
         }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -72,6 +74,7 @@ class LevelCanvas(Widget):
         self.walls = [tuple(map(int, r)) for r in data.get("walls",[])]
         self.decor = data.get("decor", [])
         self.agents = data.get("agents", [])
+        self.ramps = data.get("ramps", [])
         return True
 
     # --- Transforms ---
@@ -88,7 +91,7 @@ class LevelCanvas(Widget):
             self.drag_start_world = (touch.x, touch.y, self.cam_x, self.cam_y)
             return True
 
-        if self.tool in ("Wall","Elevator","Rug"):
+        if self.tool in ("Wall","Elevator","Rug","RampUp","RampDown"):
             self.dragging = True
             self.temp_rect = (wx, wy, 1, 1)
             return True
@@ -118,6 +121,8 @@ class LevelCanvas(Widget):
                 if inside_rect(self.decor[i]["rect"]): self.decor.pop(i); return True
             for i in reversed(range(len(self.walls))):
                 if inside_rect(self.walls[i]): self.walls.pop(i); return True
+            for i in reversed(range(len(self.ramps))):
+                if inside_rect(self.ramps[i]["rect"]): self.ramps.pop(i); return True
             # agents: near segment
             def segdist2(ax,ay,bx,by,px,py):
                 vx,vy = bx-ax, by-ay; wx2,wy2 = px-ax, py-ay
@@ -145,7 +150,7 @@ class LevelCanvas(Widget):
             self.cam_y = max(0, min(self.cam_y, self.world_h - self.height))
             return True
 
-        if self.tool in ("Wall","Elevator","Rug") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","RampUp","RampDown") and self.dragging and self.temp_rect:
             x0,y0,_,_ = self.temp_rect
             x1,y1 = wx, wy
             x = min(x0,x1); y = min(y0,y1)
@@ -155,14 +160,18 @@ class LevelCanvas(Widget):
         return False
 
     def on_touch_up(self, touch):
-        if self.tool in ("Wall","Elevator","Rug") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","RampUp","RampDown") and self.dragging and self.temp_rect:
             x,y,w,h = self.temp_rect
             if w >= GRID and h >= GRID:
                 if self.tool == "Wall":
                     self.walls.append((x,y,w,h))
                 else:
-                    kind = "elevator" if self.tool=="Elevator" else "rug"
-                    self.decor.append({"kind":kind, "rect":[x,y,w,h]})
+                    if self.tool in ("Elevator","Rug"):
+                        kind = "elevator" if self.tool=="Elevator" else "rug"
+                        self.decor.append({"kind":kind, "rect":[x,y,w,h]})
+                    else:
+                        direction = "up" if self.tool=="RampUp" else "down"
+                        self.ramps.append({"dir":direction, "rect":[x,y,w,h]})
             self.temp_rect = None; self.dragging = False; return True
 
         if self.tool == "Pan":
@@ -207,6 +216,15 @@ class LevelCanvas(Widget):
                 elif kind == "rug":
                     Color(0.13, 0.25, 0.18, 0.6)
                     Rectangle(pos=(rx,ry), size=(rw,rh))
+
+            # Ramps
+            for r in self.ramps:
+                rx,ry,rw,rh = r["rect"]
+                if r["dir"] == "up":
+                    Color(0.25,0.4,0.6,1.0)
+                else:
+                    Color(0.6,0.4,0.25,1.0)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
 
             # Agent paths + occluded cone preview
             for a in self.agents:
@@ -282,7 +300,7 @@ class LevelCanvas(Widget):
         if not self.status:
             self.status = Label(text="", font_size=14, color=(1,1,1,1), size_hint=(None,None), pos=(10, 8))
             self.add_widget(self.status)
-        self.status.text = f"Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..8=Tools)"
+        self.status.text = f"Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..0=Tools)"
         self.status.markup = True
 
 class LevelEditorRoot(FloatLayout):
@@ -307,7 +325,7 @@ class LevelEditorRoot(FloatLayout):
 
     def _build_toolbar(self):
         self.toolbar.spacing = 4
-        tools = ["Pan","Wall","Agent","Start","Hole","Elevator","Rug","Erase"]
+        tools = ["Pan","Wall","Agent","Start","Hole","Elevator","Rug","RampUp","RampDown","Erase"]
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
         # Save/Load/Clear
@@ -326,7 +344,7 @@ class LevelEditorRoot(FloatLayout):
                 ok = self.canvas_view.load_json(path)
                 self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {path}"
             elif name == "Clear":
-                self.canvas_view.walls.clear(); self.canvas_view.decor.clear(); self.canvas_view.agents.clear()
+                self.canvas_view.walls.clear(); self.canvas_view.decor.clear(); self.canvas_view.agents.clear(); self.canvas_view.ramps.clear()
                 self.canvas_view.status.text = "Cleared."
             return
         self.canvas_view.tool = name
@@ -349,7 +367,7 @@ class LevelEditorRoot(FloatLayout):
         mapping = {
             '1':"Pan", '2':"Wall", '3':"Agent", '4':"Start",
             '5':"Hole", '6':"Elevator", '7':"Rug", '8':"Erase",
-            '9':"Save", '0':"Load"
+            '9':"RampUp", '0':"RampDown"
         }
         if codepoint in mapping:
             self._select_tool(mapping[codepoint]); return True
