@@ -317,8 +317,10 @@ class StealthGolf(Widget):
     def _apply_floor(self, idx):
         f = self.floors[idx]
         self.walls = [tuple(r) for r in f.get("walls", [])]
+        self.decor_walls = set()
         # Decor
         self.decor = []
+        collidable = {"plant", "desk", "chair", "table"}
         for d in f.get("decor", []):
             if isinstance(d, dict):
                 kind = d.get("kind", "")
@@ -327,6 +329,12 @@ class StealthGolf(Widget):
             elif isinstance(d, (list, tuple)) and len(d) == 2:
                 kind, rect = d
                 self.decor.append({"kind": kind, "rect": list(rect)})
+            else:
+                continue
+            if kind in collidable:
+                rect_t = tuple(rect)
+                self.walls.append(rect_t)
+                self.decor_walls.add(rect_t)
         # Stairs
         self.stairs = []
         for s in f.get("stairs", []):
@@ -526,6 +534,25 @@ class StealthGolf(Widget):
             Color(0.12,0.13,0.16,1); grid=60
             for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
+            # Walls
+            Color(0.25,0.28,0.33,1)
+            for rx,ry,rw,rh in self.walls:
+                if (rx,ry,rw,rh) in self.decor_walls:
+                    continue
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+            # Stairs
+            for s in self.stairs:
+                rx, ry, rw, rh = s["rect"]
+                steps = 6
+                if s["dir"] == "up":
+                    Color(0.8,0.8,0.8,1)
+                else:
+                    Color(0.4,0.4,0.4,1)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.3,0.3,0.3,1)
+                for i in range(steps):
+                    y = ry + (i/steps)*rh
+                    Line(points=[rx, y, rx+rw, y], width=1)
             # Decor
             for d in self.decor:
                 kind = d.get("kind", "")
@@ -541,22 +568,20 @@ class StealthGolf(Widget):
                     for i in range(4):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
-            # Stairs
-            for s in self.stairs:
-                rx, ry, rw, rh = s["rect"]
-                steps = 6
-                if s["dir"] == "up":
-                    Color(0.8,0.8,0.8,1)
-                else:
-                    Color(0.4,0.4,0.4,1)
-                Rectangle(pos=(rx,ry), size=(rw,rh))
-                Color(0.3,0.3,0.3,1)
-                for i in range(steps):
-                    y = ry + (i/steps)*rh
-                    Line(points=[rx, y, rx+rw, y], width=1)
-            # Walls
-            Color(0.25,0.28,0.33,1)
-            for rx,ry,rw,rh in self.walls: Rectangle(pos=(rx,ry), size=(rw,rh))
+                elif kind == "plant":
+                    Color(0.22,0.55,0.25,1); Ellipse(pos=(rx, ry), size=(rw, rh))
+                    Color(0.3,0.28,0.22,1); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.6,0.45,0.25,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.1,0.1,0.1,1); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
+                    Color(0.2,0.2,0.2,1); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                    Color(0.35,0.35,0.35,1); Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.35,0.35,0.45,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.25,0.25,0.35,1); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.55,0.42,0.28,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.4,0.32,0.22,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
             # Lights (occluded)
             for a in self.agents:
                 pts = a.compute_flashlight_polygon(self.walls)

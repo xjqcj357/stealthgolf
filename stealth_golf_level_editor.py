@@ -128,7 +128,7 @@ class LevelCanvas(Widget):
             self.drag_start_world = (touch.x, touch.y, self.cam_x, self.cam_y)
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","StairUp","StairDown"):
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown"):
             self.dragging = True
             self.temp_rect = (wx, wy, 1, 1)
             return True
@@ -187,7 +187,7 @@ class LevelCanvas(Widget):
             self.cam_y = max(0, min(self.cam_y, self.world_h - self.height))
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","StairUp","StairDown") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown") and self.dragging and self.temp_rect:
             x0,y0,_,_ = self.temp_rect
             x1,y1 = wx, wy
             x = min(x0,x1); y = min(y0,y1)
@@ -197,18 +197,26 @@ class LevelCanvas(Widget):
         return False
 
     def on_touch_up(self, touch):
-        if self.tool in ("Wall","Elevator","Rug","Vent","StairUp","StairDown") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown") and self.dragging and self.temp_rect:
             x,y,w,h = self.temp_rect
             if w >= GRID and h >= GRID:
                 if self.tool == "Wall":
                     self.walls.append((x,y,w,h))
-                elif self.tool in ("Elevator","Rug","Vent"):
+                elif self.tool in ("Elevator","Rug","Vent","Plant","Desk","Chair","Table"):
                     if self.tool == "Elevator":
                         kind = "elevator"
                     elif self.tool == "Rug":
                         kind = "rug"
-                    else:
+                    elif self.tool == "Vent":
                         kind = "vent"
+                    elif self.tool == "Plant":
+                        kind = "plant"
+                    elif self.tool == "Desk":
+                        kind = "desk"
+                    elif self.tool == "Chair":
+                        kind = "chair"
+                    else:
+                        kind = "table"
                     self.decor.append({"kind":kind, "rect":[x,y,w,h]})
                 else:
                     direction = "up" if self.tool=="StairUp" else "down"
@@ -254,6 +262,20 @@ class LevelCanvas(Widget):
             for rx,ry,rw,rh in self.walls:
                 Rectangle(pos=(rx,ry), size=(rw,rh))
 
+            # Stairs
+            for r in self.stairs:
+                rx,ry,rw,rh = r["rect"]
+                steps = 6
+                if r["dir"] == "up":
+                    Color(0.8,0.8,0.8,1.0)
+                else:
+                    Color(0.4,0.4,0.4,1.0)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.3,0.3,0.3,1.0)
+                for i in range(steps):
+                    y = ry + (i/steps)*rh
+                    Line(points=[rx, y, rx+rw, y], width=1)
+
             # Decor
             for d in self.decor:
                 kind = d["kind"]; rx,ry,rw,rh = d["rect"]
@@ -272,20 +294,30 @@ class LevelCanvas(Widget):
                     for i in range(4):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
-
-            # Stairs
-            for r in self.stairs:
-                rx,ry,rw,rh = r["rect"]
-                steps = 6
-                if r["dir"] == "up":
-                    Color(0.8,0.8,0.8,1.0)
-                else:
-                    Color(0.4,0.4,0.4,1.0)
-                Rectangle(pos=(rx,ry), size=(rw,rh))
-                Color(0.3,0.3,0.3,1.0)
-                for i in range(steps):
-                    y = ry + (i/steps)*rh
-                    Line(points=[rx, y, rx+rw, y], width=1)
+                elif kind == "plant":
+                    Color(0.22,0.55,0.25,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.3,0.28,0.22,1.0)
+                    Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.6,0.45,0.25,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.1,0.1,0.1,1.0)
+                    Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
+                    Color(0.2,0.2,0.2,1.0)
+                    Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                    Color(0.35,0.35,0.35,1.0)
+                    Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.35,0.35,0.45,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.25,0.25,0.35,1.0)
+                    Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.55,0.42,0.28,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.4,0.32,0.22,1.0)
+                    Line(rectangle=(rx,ry,rw,rh), width=1.2)
 
             # Agent paths + occluded cone preview
             for a in self.agents:
@@ -305,13 +337,15 @@ class LevelCanvas(Widget):
                 end_ang = base_ang - fov_half
                 steps = 48
                 pts = []
+                collidable = {"plant","desk","chair","table"}
+                all_walls = self.walls + [d["rect"] for d in self.decor if d["kind"] in collidable]
                 for i in range(steps+1):
                     t = i/steps
                     ang = start_ang + (end_ang - start_ang)*t
                     dx,dy = cos(ang), sin(ang)
                     hit_pt = None; nearest_d2=None
                     tx,ty = ax + dx*cone_len, ay + dy*cone_len
-                    for rect in self.walls:
+                    for rect in all_walls:
                         pt = ray_rect_nearest_hit(ax, ay, dx, dy, rect)
                         if pt is not None:
                             d2 = (pt[0]-ax)**2 + (pt[1]-ay)**2
@@ -363,7 +397,7 @@ class LevelCanvas(Widget):
         if not self.status:
             self.status = Label(text="", font_size=14, color=(1,1,1,1), size_hint=(None,None), pos=(10, 8))
             self.add_widget(self.status)
-        self.status.text = f"Floor {floor_label(self.current_floor)}  •  Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..0=Tools, V=Vent)"
+        self.status.text = f"Floor {floor_label(self.current_floor)}  •  Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..0=Tools, V=Vent, P=Plant, D=Desk, O=Chair, T=Table)"
         self.status.markup = True
 
 class LevelEditorRoot(FloatLayout):
@@ -390,7 +424,7 @@ class LevelEditorRoot(FloatLayout):
 
     def _build_toolbar(self):
         self.toolbar.spacing = 4
-        tools = ["Pan","Wall","Agent","Start","Hole","Elevator","Rug","Vent","StairUp","StairDown","Erase"]
+        tools = ["Pan","Wall","Agent","Start","Hole","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Erase"]
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
 
@@ -462,6 +496,14 @@ class LevelEditorRoot(FloatLayout):
             self._select_tool(mapping[codepoint]); return True
         if codepoint in ('v','V'):
             self._select_tool("Vent"); return True
+        if codepoint in ('p','P'):
+            self._select_tool("Plant"); return True
+        if codepoint in ('d','D'):
+            self._select_tool("Desk"); return True
+        if codepoint in ('o','O'):
+            self._select_tool("Chair"); return True
+        if codepoint in ('t','T'):
+            self._select_tool("Table"); return True
         return False
 
     def _find_levels(self):
