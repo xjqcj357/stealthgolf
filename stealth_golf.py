@@ -418,12 +418,18 @@ class StealthGolf(Widget):
 
         # Stair state
         self.on_stairs = False
+        self.stair_fade_active = False
+        self.fade_t = 0.0
+        self.prev_floor = None
+        self.next_floor = None
+        self.prev_floor_data = None
+        self.next_floor_data = None
 
-    def _apply_floor(self, idx):
+    def _prep_floor(self, idx):
         f = self.floors[idx]
-        self.walls = [tuple(r) for r in f.get("walls", [])]
-        # Decor
-        self.decor = []
+        colliders = [tuple(r) for r in f.get("walls", [])]
+        walls_drawn = list(colliders)
+        decor = []
         collidable = {"plant", "desk", "chair", "table"}
         for d in f.get("decor", []):
             if isinstance(d, dict):
@@ -442,18 +448,16 @@ class StealthGolf(Widget):
                 decor_item["color"] = color
             if shape is not None:
                 decor_item["shape"] = shape
-            self.decor.append(decor_item)
+            decor.append(decor_item)
             if kind in collidable:
-                self.walls.append(tuple(rect))
-        # Stairs
-        self.stairs = []
+                colliders.append(tuple(rect))
+        stairs = []
         for s in f.get("stairs", []):
             rect = s.get("rect", [0, 0, 0, 0])
             direction = s.get("dir", "up")
             target = s.get("target", idx + (1 if direction == "up" else -1))
-            self.stairs.append({"rect": tuple(rect), "dir": direction, "target": target})
-        # Agents
-        self.agents = [
+            stairs.append({"rect": tuple(rect), "dir": direction, "target": target})
+        agents = [
             Agent(
                 a["a"][0],
                 a["a"][1],
@@ -465,6 +469,23 @@ class StealthGolf(Widget):
             )
             for a in f.get("agents", [])
         ]
+        return {
+            "idx": idx,
+            "colliders": colliders,
+            "walls_drawn": walls_drawn,
+            "decor": decor,
+            "stairs": stairs,
+            "agents": agents,
+        }
+
+    def _apply_floor(self, idx):
+        data = self._prep_floor(idx)
+        self.colliders = data["colliders"]
+        self.walls_drawn = data["walls_drawn"]
+        self.decor = data["decor"]
+        self.stairs = data["stairs"]
+        self.agents = data["agents"]
+        return data
 
     def _fallback_level(self):
         return {
@@ -591,9 +612,9 @@ class StealthGolf(Widget):
             else:
                 if self.transition_cooldown > 0:
                     self.transition_cooldown = max(0.0, self.transition_cooldown - dt)
-                self.ball.update(dt, self.walls)
+                self.ball.update(dt, self.colliders)
                 for a in self.agents:
-                    caught = a.update(dt, self.ball, self.walls)
+                    caught = a.update(dt, self.ball, self.colliders)
                     if caught and not self.win:
                         self.caught = True; self.message_timer = 2.0
                 # hole
@@ -605,8 +626,19 @@ class StealthGolf(Widget):
                 ):
                     self.win = True; self.drop_timer = 0.9; self.message_timer = 1.6
                     self.ball.vx = self.ball.vy = 0.0; self.ball.in_motion = False
-                # stairs
-                if not self.win and not self.caught:
+                if self.stair_fade_active:
+                    fade_duration = 0.4
+                    self.fade_t += dt / fade_duration
+                    if self.fade_t >= 1.0:
+                        self.current_floor = self.next_floor
+                        self._apply_floor(self.current_floor)
+                        self.transition_cooldown = 0.4
+                        self.prev_floor = None
+                        self.next_floor = None
+                        self.prev_floor_data = None
+                        self.next_floor_data = None
+                        self.stair_fade_active = False
+                elif not self.win and not self.caught:
                     currently_on_stairs = False
                     for s in self.stairs:
                         rx, ry, rw, rh = s["rect"]
@@ -615,9 +647,21 @@ class StealthGolf(Widget):
                             if not self.on_stairs and self.transition_cooldown <= 0:
                                 target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
                                 if 0 <= target < len(self.floors):
-                                    self.current_floor = target
-                                    self._apply_floor(self.current_floor)
-                                    self.transition_cooldown = 0.4
+                                    self.prev_floor = self.current_floor
+                                    self.next_floor = target
+                                    self.prev_floor_data = {
+                                        "idx": self.prev_floor,
+                                        "colliders": self.colliders,
+                                        "walls_drawn": self.walls_drawn,
+                                        "decor": self.decor,
+                                        "stairs": self.stairs,
+                                        "agents": self.agents,
+                                    }
+                                    self.next_floor_data = self._prep_floor(target)
+                                    self.colliders = self.prev_floor_data["colliders"] + self.next_floor_data["colliders"]
+                                    self.walls_drawn = self.prev_floor_data["walls_drawn"] + self.next_floor_data["walls_drawn"]
+                                    self.fade_t = 0.0
+                                    self.stair_fade_active = True
                                     self.on_stairs = True
                             break
                     if not currently_on_stairs:
@@ -634,6 +678,64 @@ class StealthGolf(Widget):
     def screen_to_world(self, sx, sy): return (sx + self.cam_x, sy + self.cam_y)
 
     # ------------- Draw -------------
+    def draw_floor(self, floor, alpha):
+        Color(0.25,0.28,0.33,alpha)
+        for rx,ry,rw,rh in floor["walls_drawn"]:
+            Rectangle(pos=(rx,ry), size=(rw,rh))
+        for d in floor["decor"]:
+            kind = d.get("kind", "")
+            rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])
+            if kind == "elevator":
+                Color(0.18, 0.2, 0.24, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+                Color(0.26, 0.28, 0.32, alpha); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
+            elif kind == "rug":
+                Color(0.13, 0.25, 0.18, 0.6*alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+            elif kind == "vent":
+                Color(0.75,0.75,0.78,alpha); Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.6,0.6,0.62,alpha)
+                for i in range(4):
+                    y = ry + (i+1)*rh/5
+                    Line(points=[rx, y, rx+rw, y], width=1)
+            elif kind == "plant":
+                Color(0.16,0.4,0.18,alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
+                Color(0.2,0.25,0.2,alpha); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+            elif kind == "desk":
+                Color(0.45,0.33,0.18,alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+                Color(0.1,0.1,0.1,alpha); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
+                Color(0.2,0.2,0.2,alpha); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                Color(0.3,0.3,0.3,alpha); Rectangle(pos=(rx+5, ry+10), size=(50,8))
+            elif kind == "chair":
+                Color(0.25,0.25,0.3,alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+                Color(0.15,0.15,0.2,alpha); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+            elif kind == "table":
+                Color(0.4,0.3,0.2,alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+                Color(0.3,0.22,0.15,alpha); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+            else:
+                col = d.get("color", [0.3, 0.3, 0.35, 1])
+                if len(col) == 3:
+                    Color(col[0], col[1], col[2], alpha)
+                else:
+                    Color(col[0], col[1], col[2], col[3]*alpha)
+                shape = d.get("shape", "rect")
+                if shape == "ellipse":
+                    Ellipse(pos=(rx, ry), size=(rw, rh))
+                else:
+                    Rectangle(pos=(rx, ry), size=(rw, rh))
+        for a in floor["agents"]:
+            pts = a.compute_flashlight_polygon(floor["colliders"])
+            verts=[(a.x,a.y,0,0)] + [(x,y,0,0) for (x,y) in pts]
+            idx=[]
+            for i in range(1,len(verts)-1): idx.extend([0,i,i+1])
+            Color(1,1,0.65,(0.18 if not a.chasing else 0.35)*alpha)
+            Mesh(vertices=sum(([vx,vy,0,0] for vx,vy,_,_ in verts), []), indices=idx, mode='triangles')
+        for a in floor["agents"]:
+            Color(0.9,0.2,0.2,(1.0 if not a.chasing else 0.9)*alpha)
+            Rectangle(pos=(a.x-8,a.y-8), size=(16,16))
+        if floor["idx"] == self.hole_floor:
+            cx,cy,hr=self.hole
+            Color(0.1,0.5,0.15,alpha); Ellipse(pos=(cx-(hr+6), cy-(hr+6)), size=((hr+6)*2,(hr+6)*2))
+            Color(0.02,0.02,0.02,alpha); Ellipse(pos=(cx-hr, cy-hr), size=(hr*2,hr*2))
+
     def draw(self):
         self.canvas.clear()
         with self.canvas:
@@ -644,50 +746,18 @@ class StealthGolf(Widget):
             Color(0.12,0.13,0.16,1); grid=60
             for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
-            # Walls
-            Color(0.25,0.28,0.33,1)
-            for rx,ry,rw,rh in self.walls:
-                Rectangle(pos=(rx,ry), size=(rw,rh))
-            # Decor
-            for d in self.decor:
-                kind = d.get("kind", "")
-                rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])
-                if kind == "elevator":
-                    Color(0.18, 0.2, 0.24, 1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.26, 0.28, 0.32, 1); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
-                elif kind == "rug":
-                    Color(0.13, 0.25, 0.18, 0.6); Rectangle(pos=(rx, ry), size=(rw, rh))
-                elif kind == "vent":
-                    Color(0.75,0.75,0.78,1); Rectangle(pos=(rx,ry), size=(rw,rh))
-                    Color(0.6,0.6,0.62,1)
-                    for i in range(4):
-                        y = ry + (i+1)*rh/5
-                        Line(points=[rx, y, rx+rw, y], width=1)
-                elif kind == "plant":
-                    Color(0.16,0.4,0.18,1); Ellipse(pos=(rx, ry), size=(rw, rh))
-                    Color(0.2,0.25,0.2,1); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
-                elif kind == "desk":
-                    Color(0.45,0.33,0.18,1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.1,0.1,0.1,1); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
-                    Color(0.2,0.2,0.2,1); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
-                    Color(0.3,0.3,0.3,1); Rectangle(pos=(rx+5, ry+10), size=(50,8))
-                elif kind == "chair":
-                    Color(0.25,0.25,0.3,1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.15,0.15,0.2,1); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
-                elif kind == "table":
-                    Color(0.4,0.3,0.2,1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.3,0.22,0.15,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
-                else:
-                    col = d.get("color", [0.3, 0.3, 0.35, 1])
-                    if len(col) == 3:
-                        Color(col[0], col[1], col[2], 1)
-                    else:
-                        Color(*col)
-                    shape = d.get("shape", "rect")
-                    if shape == "ellipse":
-                        Ellipse(pos=(rx, ry), size=(rw, rh))
-                    else:
-                        Rectangle(pos=(rx, ry), size=(rw, rh))
+            if self.stair_fade_active:
+                self.draw_floor(self.prev_floor_data, 1 - self.fade_t)
+                self.draw_floor(self.next_floor_data, self.fade_t)
+            else:
+                self.draw_floor({
+                    "idx": self.current_floor,
+                    "colliders": self.colliders,
+                    "walls_drawn": self.walls_drawn,
+                    "decor": self.decor,
+                    "stairs": self.stairs,
+                    "agents": self.agents,
+                }, 1.0)
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]
@@ -701,23 +771,6 @@ class StealthGolf(Widget):
                 for i in range(steps):
                     y = ry + (i/steps)*rh
                     Line(points=[rx, y, rx+rw, y], width=1)
-            # Lights (occluded)
-            for a in self.agents:
-                pts = a.compute_flashlight_polygon(self.walls)
-                verts=[(a.x,a.y,0,0)] + [(x,y,0,0) for (x,y) in pts]
-                idx=[]; 
-                for i in range(1,len(verts)-1): idx.extend([0,i,i+1])
-                Color(1,1,0.65, 0.18 if not a.chasing else 0.35)
-                Mesh(vertices=sum(([vx,vy,0,0] for vx,vy,_,_ in verts), []), indices=idx, mode='triangles')
-            # Agents
-            for a in self.agents:
-                Color(0.9,0.2,0.2, 1.0 if not a.chasing else 0.9)
-                Rectangle(pos=(a.x-8,a.y-8), size=(16,16))
-            # Hole
-            if self.current_floor == self.hole_floor:
-                cx,cy,hr=self.hole
-                Color(0.1,0.5,0.15,1); Ellipse(pos=(cx-(hr+6), cy-(hr+6)), size=((hr+6)*2,(hr+6)*2))
-                Color(0.02,0.02,0.02,1); Ellipse(pos=(cx-hr, cy-hr), size=(hr*2,hr*2))
             # Ball
             if self.ball.smoke_timer > 0:
                 Color(0.35,0.35,0.38,1)
