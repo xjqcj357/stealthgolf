@@ -337,12 +337,20 @@ class StealthGolf(Widget):
             if isinstance(d, dict):
                 kind = d.get("kind", "")
                 rect = d.get("rect", [0, 0, 0, 0])
-                self.decor.append({"kind": kind, "rect": rect})
-            elif isinstance(d, (list, tuple)) and len(d) == 2:
-                kind, rect = d
-                self.decor.append({"kind": kind, "rect": list(rect)})
+                color = d.get("color")
+                shape = d.get("shape")
+            elif isinstance(d, (list, tuple)) and len(d) >= 2:
+                kind, rect = d[0], d[1]
+                color = d[2] if len(d) > 2 else None
+                shape = d[3] if len(d) > 3 else None
             else:
                 continue
+            decor_item = {"kind": kind, "rect": list(rect)}
+            if color is not None:
+                decor_item["color"] = color
+            if shape is not None:
+                decor_item["shape"] = shape
+            self.decor.append(decor_item)
             if kind in collidable:
                 self.walls.append(tuple(rect))
         # Stairs
@@ -573,6 +581,17 @@ class StealthGolf(Widget):
                 elif kind == "table":
                     Color(0.4,0.3,0.2,1); Rectangle(pos=(rx, ry), size=(rw, rh))
                     Color(0.3,0.22,0.15,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+                else:
+                    col = d.get("color", [0.3, 0.3, 0.35, 1])
+                    if len(col) == 3:
+                        Color(col[0], col[1], col[2], 1)
+                    else:
+                        Color(*col)
+                    shape = d.get("shape", "rect")
+                    if shape == "ellipse":
+                        Ellipse(pos=(rx, ry), size=(rw, rh))
+                    else:
+                        Rectangle(pos=(rx, ry), size=(rw, rh))
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]
