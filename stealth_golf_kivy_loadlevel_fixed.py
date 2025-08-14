@@ -242,6 +242,12 @@ class StealthGolf(Widget):
         self.caught=False; self.win=False; self.message_timer=0.0
         self.drop_total=0.9; self.drop_timer=0.0
 
+        # Ramp transition state
+        self.fade_alpha = 0.0
+        self.fade_phase = None  # None, 'out', 'in'
+        self.fade_target = None
+        self.transition_dir = 0  # +1 up, -1 down
+
         Clock.schedule_interval(self.update, 1.0/60.0)
 
     # --------- Level I/O ----------
@@ -289,6 +295,13 @@ class StealthGolf(Widget):
                 kind, rect = d
                 self.decor.append({"kind": kind, "rect": list(rect)})
 
+        # Ramps / stairwells
+        self.ramps = []
+        for r in data.get("ramps", []):
+            rect = r.get("rect", [0,0,0,0])
+            direction = r.get("dir", "up")
+            self.ramps.append({"rect": tuple(rect), "dir": direction})
+
         self.start_pos = tuple(data.get("start", [240,220]))
         hole = data.get("hole", {"cx":1240,"cy":2020,"r":22})
         self.hole = (int(hole["cx"]), int(hole["cy"]), int(hole.get("r",22)))
@@ -312,6 +325,7 @@ class StealthGolf(Widget):
                 "hole":{"cx":1240,"cy":2020,"r":22},
                 "walls":[(0,0,1400,40),(0,0,40,2200),(1360,0,40,2200),(0,2160,1400,40)],
                 "decor":[],
+                "ramps":[],
                 "agents":[{"a":[300,600],"b":[1000,600],"speed":90}]}
 
     def _try_load_next_level(self):
@@ -336,6 +350,25 @@ class StealthGolf(Widget):
                 return True
         print("No further levels found up to", MAX_LEVEL_INDEX)
         return False
+
+    def _load_level_index(self, idx):
+        if idx < 1 or idx > MAX_LEVEL_INDEX:
+            return False
+        candidates = [
+            f"stealth_level_{idx}.json",
+            f"level_{idx}.json",
+            f"stealth_level_{idx}.py",
+            f"level_{idx}.py",
+        ]
+        path = _find_first_existing(candidates)
+        if not path:
+            return False
+        data = self._load_level_data_from_path(path)
+        self.level_path = path
+        self.level_index = idx
+        self._apply_level_data(data)
+        self.caught=False; self.win=False; self.message_timer=0.0; self.drop_timer=0.0
+        return True
 
     # ------------- Input -------------
     def on_touch_down(self, touch):
@@ -375,23 +408,52 @@ class StealthGolf(Widget):
 
     # ------------- Update -------------
     def update(self, dt):
-        if self.drop_timer > 0:
-            self.drop_timer = max(0.0, self.drop_timer - dt)
-            if self.drop_timer == 0.0:
-                # Auto-advance when drop finishes
-                if not self._try_load_next_level():
-                    self._next_level_banner()
+        fade_speed = 1.5
+        if self.fade_phase == 'out':
+            self.fade_alpha = min(1.0, self.fade_alpha + dt * fade_speed)
+            if self.fade_alpha >= 1.0:
+                if self._load_level_index(self.fade_target):
+                    self.fade_phase = 'in'
+                    self.fade_alpha = 1.0
+                else:
+                    self.fade_phase = None
+        elif self.fade_phase == 'in':
+            self.fade_alpha = max(0.0, self.fade_alpha - dt * fade_speed)
+            if self.fade_alpha <= 0.0:
+                self.fade_phase = None
         else:
-            self.ball.update(dt, self.walls)
-            for a in self.agents:
-                caught = a.update(dt, self.ball, self.walls)
-                if caught and not self.win:
-                    self.caught = True; self.message_timer = 2.0
-            # hole
-            cx, cy, hr = self.hole
-            if not self.win and length(self.ball.x - cx, self.ball.y - cy) <= (hr - 2):
-                self.win = True; self.drop_timer = 0.9; self.message_timer = 1.6
-                self.ball.vx = self.ball.vy = 0.0; self.ball.in_motion = False
+            if self.drop_timer > 0:
+                self.drop_timer = max(0.0, self.drop_timer - dt)
+                if self.drop_timer == 0.0:
+                    # Auto-advance when drop finishes
+                    if not self._try_load_next_level():
+                        self._next_level_banner()
+            else:
+                self.ball.update(dt, self.walls)
+                for a in self.agents:
+                    caught = a.update(dt, self.ball, self.walls)
+                    if caught and not self.win:
+                        self.caught = True; self.message_timer = 2.0
+                # hole
+                cx, cy, hr = self.hole
+                if not self.win and length(self.ball.x - cx, self.ball.y - cy) <= (hr - 2):
+                    self.win = True; self.drop_timer = 0.9; self.message_timer = 1.6
+                    self.ball.vx = self.ball.vy = 0.0; self.ball.in_motion = False
+                # ramps
+                if not self.win and not self.caught:
+                    for r in self.ramps:
+                        rx, ry, rw, rh = r["rect"]
+                        if rx <= self.ball.x <= rx + rw and ry <= self.ball.y <= ry + rh:
+                            target = self.level_index + (1 if r["dir"] == "up" else -1)
+                            if r["dir"] == "up":
+                                if self._load_level_index(target):
+                                    self.fade_alpha = 1.0
+                                    self.fade_phase = 'in'
+                            else:
+                                self.fade_target = target
+                                self.fade_alpha = 0.0
+                                self.fade_phase = 'out'
+                            break
         self._update_camera(); self.draw()
 
     # ------------- Camera -------------
@@ -423,6 +485,14 @@ class StealthGolf(Widget):
                     Color(0.26,0.28,0.32,1); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
                 elif kind=="rug":
                     Color(0.13,0.25,0.18,0.6); Rectangle(pos=(rx,ry), size=(rw,rh))
+            # Ramps
+            for r in self.ramps:
+                rx, ry, rw, rh = r["rect"]
+                if r["dir"] == "up":
+                    Color(0.25,0.4,0.6,1)
+                else:
+                    Color(0.6,0.4,0.25,1)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
             # Walls
             Color(0.25,0.28,0.33,1)
             for rx,ry,rw,rh in self.walls: Rectangle(pos=(rx,ry), size=(rw,rh))
@@ -443,7 +513,10 @@ class StealthGolf(Widget):
             Color(0.1,0.5,0.15,1); Ellipse(pos=(cx-(hr+6), cy-(hr+6)), size=((hr+6)*2,(hr+6)*2))
             Color(0.02,0.02,0.02,1); Ellipse(pos=(cx-hr, cy-hr), size=(hr*2,hr*2))
             # Ball
-            Color(0.35,0.35,0.38,1) if self.ball.smoke_timer>0 else Color(0.95,0.95,0.95,1)
+            if self.ball.smoke_timer > 0:
+                Color(0.35,0.35,0.38,1)
+            else:
+                Color(0.95,0.95,0.95,1)
             Ellipse(pos=(self.ball.x-14, self.ball.y-14), size=(28,28))
             # Aim line
             if self.aiming:
@@ -453,6 +526,9 @@ class StealthGolf(Widget):
             # UI overlay
             Color(0.18,0.18,0.2,0.8); Rectangle(pos=(self.width - 140, self.height - 60), size=(130, 48))
             Color(1,1,1,1); Line(rectangle=(self.width - 140, self.height - 60, 130, 48), width=1.2)
+            # Fade overlay
+            if self.fade_alpha > 0:
+                Color(0,0,0,self.fade_alpha); Rectangle(pos=(0,0), size=(self.width, self.height))
         self._labels()
 
     def _labels(self):
