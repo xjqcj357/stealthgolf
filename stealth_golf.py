@@ -597,7 +597,7 @@ class StealthGolf(Widget):
             Color(0.12,0.13,0.16,1); grid=60
             for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
-            # Decor
+            # Decor (sprites or fallback shapes)
             for d in self.decor:
                 kind = d.get("kind", "")
                 rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])

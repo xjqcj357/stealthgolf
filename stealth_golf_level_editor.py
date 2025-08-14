@@ -74,7 +74,8 @@ class LevelCanvas(Widget):
         self.cam_x, self.cam_y = 0, 0
         # Data
         self.walls = []
-        self.decor = []  # [{"kind":..., "rect":[x,y,w,h]}]
+        # Decor entries loaded/saved as dicts with kind, rect, and optional color/shape
+        self.decor = []  # {"kind":..., "rect":[x,y,w,h], "color":[r,g,b,a], "shape":"rect|ellipse"}
         self.agents = [] # [{"a":[x,y], "b":[x,y], "speed":..., "fov_deg":..., "cone_len":...}]
         self.floors = [self._new_floor()]
         self.current_floor = 0
@@ -324,28 +325,36 @@ class LevelCanvas(Widget):
 
             # Decor
             for d in self.decor:
-                kind = d["kind"]; rx,ry,rw,rh = d["rect"]
+                kind = d["kind"]; rx, ry, rw, rh = d["rect"]
                 tex = self._get_sprite_texture(kind)
                 if tex:
-                    Rectangle(texture=tex, pos=(rx,ry), size=(rw,rh))
+                    Rectangle(texture=tex, pos=(rx, ry), size=(rw, rh))
                 elif kind == "elevator":
                     Color(0.18, 0.2, 0.24, 1.0)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Rectangle(pos=(rx, ry), size=(rw, rh))
                     Color(0.26, 0.28, 0.32, 1.0)
                     Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
                 elif kind == "rug":
                     Color(0.13, 0.25, 0.18, 0.6)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Rectangle(pos=(rx, ry), size=(rw, rh))
                 elif kind == "vent":
-                    Color(0.75,0.75,0.78,1.0)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
-                    Color(0.6,0.6,0.62,1.0)
+                    Color(0.75, 0.75, 0.78, 1.0)
+                    Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.6, 0.6, 0.62, 1.0)
                     for i in range(4):
-                        y = ry + (i+1)*rh/5
-                        Line(points=[rx, y, rx+rw, y], width=1)
+                        y = ry + (i + 1) * rh / 5
+                        Line(points=[rx, y, rx + rw, y], width=1)
                 else:
-                    Color(0.3,0.3,0.35,1.0)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    col = d.get("color", [0.3, 0.3, 0.35, 1])
+                    if len(col) == 3:
+                        Color(col[0], col[1], col[2], 1)
+                    else:
+                        Color(*col)
+                    shape = d.get("shape", "rect")
+                    if shape == "ellipse":
+                        Ellipse(pos=(rx, ry), size=(rw, rh))
+                    else:
+                        Rectangle(pos=(rx, ry), size=(rw, rh))
 
             # Stairs
             for r in self.stairs:
