@@ -311,6 +311,9 @@ class StealthGolf(Widget):
         self.cam_y = 0
         self._update_camera()
 
+        # Stair state
+        self.on_stairs = False
+
     def _apply_floor(self, idx):
         f = self.floors[idx]
         self.walls = [tuple(r) for r in f.get("walls", [])]
@@ -485,20 +488,22 @@ class StealthGolf(Widget):
                     self.win = True; self.drop_timer = 0.9; self.message_timer = 1.6
                     self.ball.vx = self.ball.vy = 0.0; self.ball.in_motion = False
                 # stairs
-                if (
-                    not self.win
-                    and not self.caught
-                    and self.transition_cooldown <= 0
-                ):
+                if not self.win and not self.caught:
+                    currently_on_stairs = False
                     for s in self.stairs:
                         rx, ry, rw, rh = s["rect"]
                         if rx <= self.ball.x <= rx + rw and ry <= self.ball.y <= ry + rh:
-                            target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
-                            if 0 <= target < len(self.floors):
-                                self.current_floor = target
-                                self._apply_floor(self.current_floor)
-                                self.transition_cooldown = 0.4
+                            currently_on_stairs = True
+                            if not self.on_stairs and self.transition_cooldown <= 0:
+                                target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
+                                if 0 <= target < len(self.floors):
+                                    self.current_floor = target
+                                    self._apply_floor(self.current_floor)
+                                    self.transition_cooldown = 0.4
+                                    self.on_stairs = True
                             break
+                    if not currently_on_stairs:
+                        self.on_stairs = False
         self._update_camera(); self.draw()
 
     # ------------- Camera -------------
@@ -617,6 +622,7 @@ class StealthGolf(Widget):
         self.ball.vx = self.ball.vy = 0.0
         self.ball.smoke_timer = 0.0
         self.caught = False; self.win=False; self.drop_timer=0.0; self.message_timer=0.0
+        self.on_stairs = False
         for a in self.agents:
             a.x,a.y = a.ax,a.ay; a.dir=1; a.chasing=False; a.look_dirx, a.look_diry = normalize(a.bx-a.ax, a.by-a.ay)
 
