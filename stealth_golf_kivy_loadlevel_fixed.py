@@ -247,6 +247,8 @@ class StealthGolf(Widget):
         self.fade_phase = None  # None, 'out', 'in'
         self.fade_target = None
         self.transition_dir = 0  # +1 up, -1 down
+        self.transition_cooldown = 0.0
+        self.on_stairs = False
 
         Clock.schedule_interval(self.update, 1.0/60.0)
 
@@ -278,55 +280,93 @@ class StealthGolf(Widget):
                 return json.load(f)
 
     def _apply_level_data(self, data):
-        self.world_w = int(data.get("world",{}).get("w", 1400))
-        self.world_h = int(data.get("world",{}).get("h", 2200))
+        self.world_w = int(data.get("world", {}).get("w", 1400))
+        self.world_h = int(data.get("world", {}).get("h", 2200))
 
-        # Walls: list of rect tuples/lists
-        self.walls = [tuple(r) for r in data.get("walls",[])]
+        self.start_pos = tuple(data.get("start", [240, 220]))
+        self.start_floor = int(data.get("start_floor", 0))
+        hole = data.get("hole", {"cx": 1240, "cy": 2020, "r": 22})
+        self.hole = (int(hole["cx"]), int(hole["cy"]), int(hole.get("r", 22)))
+        self.hole_floor = int(data.get("hole_floor", 0))
 
-        # Decor: allow dicts ({"kind":..., "rect":[x,y,w,h]}) or tuples from old exporter
-        self.decor = []
-        for d in data.get("decor", []):
-            if isinstance(d, dict):
-                kind = d.get("kind",""); rect = d.get("rect",[0,0,0,0])
-                self.decor.append({"kind": kind, "rect": rect})
-            elif isinstance(d, (list, tuple)) and len(d) == 2:
-                # Back-compat with ("elevator", (x,y,w,h))
-                kind, rect = d
-                self.decor.append({"kind": kind, "rect": list(rect)})
+        if "floors" in data:
+            self.floors = data["floors"]
+        else:
+            self.floors = [
+                {
+                    "walls": [tuple(r) for r in data.get("walls", [])],
+                    "decor": data.get("decor", []),
+                    "agents": data.get("agents", []),
+                    "stairs": data.get("ramps", []),
+                }
+            ]
 
-        # Ramps / stairwells
-        self.ramps = []
-        for r in data.get("ramps", []):
-            rect = r.get("rect", [0,0,0,0])
-            direction = r.get("dir", "up")
-            self.ramps.append({"rect": tuple(rect), "dir": direction})
-
-        self.start_pos = tuple(data.get("start", [240,220]))
-        hole = data.get("hole", {"cx":1240,"cy":2020,"r":22})
-        self.hole = (int(hole["cx"]), int(hole["cy"]), int(hole.get("r",22)))
-
-        # Agents
-        self.agents = [Agent(a["a"][0],a["a"][1], a["b"][0],a["b"][1],
-                             speed=a.get("speed",80),
-                             fov_deg=a.get("fov_deg",60),
-                             cone_len=a.get("cone_len",260)) for a in data.get("agents", [])]
+        self.current_floor = max(0, min(self.start_floor, len(self.floors) - 1))
+        self._apply_floor(self.current_floor)
 
         # Entities
         self.ball = Ball(*self.start_pos)
 
         # Camera reset
-        self.cam_x = 0; self.cam_y = 0
+        self.cam_x = 0
+        self.cam_y = 0
         self._update_camera()
 
+    def _apply_floor(self, idx):
+        f = self.floors[idx]
+        self.walls = [tuple(r) for r in f.get("walls", [])]
+        # Decor
+        self.decor = []
+        for d in f.get("decor", []):
+            if isinstance(d, dict):
+                kind = d.get("kind", "")
+                rect = d.get("rect", [0, 0, 0, 0])
+                self.decor.append({"kind": kind, "rect": rect})
+            elif isinstance(d, (list, tuple)) and len(d) == 2:
+                kind, rect = d
+                self.decor.append({"kind": kind, "rect": list(rect)})
+        # Stairs
+        self.stairs = []
+        for s in f.get("stairs", []):
+            rect = s.get("rect", [0, 0, 0, 0])
+            direction = s.get("dir", "up")
+            target = s.get("target", idx + (1 if direction == "up" else -1))
+            self.stairs.append({"rect": tuple(rect), "dir": direction, "target": target})
+        # Agents
+        self.agents = [
+            Agent(
+                a["a"][0],
+                a["a"][1],
+                a["b"][0],
+                a["b"][1],
+                speed=a.get("speed", 80),
+                fov_deg=a.get("fov_deg", 60),
+                cone_len=a.get("cone_len", 260),
+            )
+            for a in f.get("agents", [])
+        ]
+
     def _fallback_level(self):
-        return {"world":{"w":1400,"h":2200},
-                "start":[240,220],
-                "hole":{"cx":1240,"cy":2020,"r":22},
-                "walls":[(0,0,1400,40),(0,0,40,2200),(1360,0,40,2200),(0,2160,1400,40)],
-                "decor":[],
-                "ramps":[],
-                "agents":[{"a":[300,600],"b":[1000,600],"speed":90}]}
+        return {
+            "world": {"w": 1400, "h": 2200},
+            "start": [240, 220],
+            "start_floor": 0,
+            "hole": {"cx": 1240, "cy": 2020, "r": 22},
+            "hole_floor": 0,
+            "floors": [
+                {
+                    "walls": [
+                        (0, 0, 1400, 40),
+                        (0, 0, 40, 2200),
+                        (1360, 0, 40, 2200),
+                        (0, 2160, 1400, 40),
+                    ],
+                    "decor": [],
+                    "stairs": [],
+                    "agents": [{"a": [300, 600], "b": [1000, 600], "speed": 90}],
+                }
+            ],
+        }
 
     def _try_load_next_level(self):
         # Build candidate names for next indices up to MAX_LEVEL_INDEX
@@ -429,6 +469,8 @@ class StealthGolf(Widget):
                     if not self._try_load_next_level():
                         self._next_level_banner()
             else:
+                if self.transition_cooldown > 0:
+                    self.transition_cooldown = max(0.0, self.transition_cooldown - dt)
                 self.ball.update(dt, self.walls)
                 for a in self.agents:
                     caught = a.update(dt, self.ball, self.walls)
@@ -436,24 +478,30 @@ class StealthGolf(Widget):
                         self.caught = True; self.message_timer = 2.0
                 # hole
                 cx, cy, hr = self.hole
-                if not self.win and length(self.ball.x - cx, self.ball.y - cy) <= (hr - 2):
+                if (
+                    self.current_floor == self.hole_floor
+                    and not self.win
+                    and length(self.ball.x - cx, self.ball.y - cy) <= (hr - 2)
+                ):
                     self.win = True; self.drop_timer = 0.9; self.message_timer = 1.6
                     self.ball.vx = self.ball.vy = 0.0; self.ball.in_motion = False
-                # ramps
+                # stairs
                 if not self.win and not self.caught:
-                    for r in self.ramps:
-                        rx, ry, rw, rh = r["rect"]
+                    on_any = False
+                    for s in self.stairs:
+                        rx, ry, rw, rh = s["rect"]
                         if rx <= self.ball.x <= rx + rw and ry <= self.ball.y <= ry + rh:
-                            target = self.level_index + (1 if r["dir"] == "up" else -1)
-                            if r["dir"] == "up":
-                                if self._load_level_index(target):
-                                    self.fade_alpha = 1.0
-                                    self.fade_phase = 'in'
-                            else:
-                                self.fade_target = target
-                                self.fade_alpha = 0.0
-                                self.fade_phase = 'out'
+                            on_any = True
+                            if not self.on_stairs and self.transition_cooldown <= 0:
+                                target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
+                                if 0 <= target < len(self.floors):
+                                    self.current_floor = target
+                                    self._apply_floor(self.current_floor)
+                                    self.transition_cooldown = 0.4
+                                    self.on_stairs = True
                             break
+                    if not on_any:
+                        self.on_stairs = False
         self._update_camera(); self.draw()
 
     # ------------- Camera -------------
@@ -478,21 +526,32 @@ class StealthGolf(Widget):
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
             # Decor
             for d in self.decor:
-                kind = d.get("kind","")
-                rx,ry,rw,rh = d.get("rect",[0,0,0,0])
-                if kind=="elevator":
-                    Color(0.18,0.2,0.24,1); Rectangle(pos=(rx,ry), size=(rw,rh))
-                    Color(0.26,0.28,0.32,1); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
-                elif kind=="rug":
-                    Color(0.13,0.25,0.18,0.6); Rectangle(pos=(rx,ry), size=(rw,rh))
-            # Ramps
-            for r in self.ramps:
-                rx, ry, rw, rh = r["rect"]
-                if r["dir"] == "up":
-                    Color(0.25,0.4,0.6,1)
+                kind = d.get("kind", "")
+                rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])
+                if kind == "elevator":
+                    Color(0.18, 0.2, 0.24, 1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.26, 0.28, 0.32, 1); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
+                elif kind == "rug":
+                    Color(0.13, 0.25, 0.18, 0.6); Rectangle(pos=(rx, ry), size=(rw, rh))
+                elif kind == "vent":
+                    Color(0.75,0.75,0.78,1); Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.6,0.6,0.62,1)
+                    for i in range(4):
+                        y = ry + (i+1)*rh/5
+                        Line(points=[rx, y, rx+rw, y], width=1)
+            # Stairs
+            for s in self.stairs:
+                rx, ry, rw, rh = s["rect"]
+                steps = 6
+                if s["dir"] == "up":
+                    Color(0.8,0.8,0.8,1)
                 else:
-                    Color(0.6,0.4,0.25,1)
+                    Color(0.4,0.4,0.4,1)
                 Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.3,0.3,0.3,1)
+                for i in range(steps):
+                    y = ry + (i/steps)*rh
+                    Line(points=[rx, y, rx+rw, y], width=1)
             # Walls
             Color(0.25,0.28,0.33,1)
             for rx,ry,rw,rh in self.walls: Rectangle(pos=(rx,ry), size=(rw,rh))
@@ -509,9 +568,10 @@ class StealthGolf(Widget):
                 Color(0.9,0.2,0.2, 1.0 if not a.chasing else 0.9)
                 Rectangle(pos=(a.x-8,a.y-8), size=(16,16))
             # Hole
-            cx,cy,hr=self.hole
-            Color(0.1,0.5,0.15,1); Ellipse(pos=(cx-(hr+6), cy-(hr+6)), size=((hr+6)*2,(hr+6)*2))
-            Color(0.02,0.02,0.02,1); Ellipse(pos=(cx-hr, cy-hr), size=(hr*2,hr*2))
+            if self.current_floor == self.hole_floor:
+                cx,cy,hr=self.hole
+                Color(0.1,0.5,0.15,1); Ellipse(pos=(cx-(hr+6), cy-(hr+6)), size=((hr+6)*2,(hr+6)*2))
+                Color(0.02,0.02,0.02,1); Ellipse(pos=(cx-hr, cy-hr), size=(hr*2,hr*2))
             # Ball
             if self.ball.smoke_timer > 0:
                 Color(0.35,0.35,0.38,1)
