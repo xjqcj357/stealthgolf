@@ -369,6 +369,8 @@ class LevelCanvas(Widget):
 class LevelEditorRoot(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Track which file is currently loaded/saved
+        self.current_file = "stealth_level.json"
         # Canvas area
         self.canvas_view = LevelCanvas(size_hint=(1,1), pos_hint={"x":0,"y":0})
         self.add_widget(self.canvas_view)
@@ -410,14 +412,17 @@ class LevelEditorRoot(FloatLayout):
     def _select_tool(self, name):
         if name in ("Save","Load","Clear"):
             if name == "Save":
-                path = "stealth_level.json"
+                path = self.current_file or "stealth_level.json"
                 self.canvas_view.save_json(path)
+                self.current_file = path
                 self.canvas_view.status.text = f"Saved to {path}"
                 self._update_load_spinner()
             elif name == "Load":
                 filename = self.load_spinner.text
                 if filename != "Load":
                     ok = self.canvas_view.load_json(filename)
+                    if ok:
+                        self.current_file = filename
                     self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {filename}"
                     self._update_floor_spinner()
             elif name == "Clear":
@@ -470,6 +475,8 @@ class LevelEditorRoot(FloatLayout):
         if text == "Load":
             return
         ok = self.canvas_view.load_json(text)
+        if ok:
+            self.current_file = text
         self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {text}"
         self._update_floor_spinner()
 
