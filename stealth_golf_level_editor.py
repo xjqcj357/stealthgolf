@@ -277,6 +277,12 @@ class LevelCanvas(Widget):
                     Line(points=[rx, y, rx+rw, y], width=1)
 
             # Decor
+            # Walls
+            Color(0.25, 0.28, 0.33, 1.0)
+            for rx,ry,rw,rh in self.walls:
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+
+            # Decor
             for d in self.decor:
                 kind = d["kind"]; rx,ry,rw,rh = d["rect"]
                 if kind == "elevator":
@@ -301,6 +307,12 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
                 elif kind == "desk":
                     Color(0.6,0.45,0.25,1.0)
+                    Color(0.16,0.4,0.18,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.2,0.25,0.2,1.0)
+                    Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.45,0.33,0.18,1.0)
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.1,0.1,0.1,1.0)
                     Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
@@ -318,6 +330,32 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.4,0.32,0.22,1.0)
                     Line(rectangle=(rx,ry,rw,rh), width=1.2)
+                    Color(0.3,0.3,0.3,1.0)
+                    Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.25,0.25,0.3,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.15,0.15,0.2,1.0)
+                    Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.4,0.3,0.2,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.3,0.22,0.15,1.0)
+                    Line(rectangle=(rx,ry,rw,rh), width=1.2)
+
+            # Stairs
+            for r in self.stairs:
+                rx,ry,rw,rh = r["rect"]
+                steps = 6
+                if r["dir"] == "up":
+                    Color(0.8,0.8,0.8,1.0)
+                else:
+                    Color(0.4,0.4,0.4,1.0)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.3,0.3,0.3,1.0)
+                for i in range(steps):
+                    y = ry + (i/steps)*rh
+                    Line(points=[rx, y, rx+rw, y], width=1)
 
             # Agent paths + occluded cone preview
             for a in self.agents:

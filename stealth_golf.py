@@ -11,14 +11,106 @@ from kivy.core.window import Window
 from kivy.graphics import Color, Ellipse, Rectangle, Line, Triangle, PushMatrix, PopMatrix, Translate, Mesh
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
-from common.geometry import (
-    clamp,
-    length,
-    normalize,
-    seg_intersect,
-    ray_rect_nearest_hit,
-    los_blocked,
-)
+# Ensure ``common.geometry`` is available.  If the package is missing, a
+# minimal copy of the helpers is written to ``common/geometry.py`` and then
+# imported.  This allows the game to start even when the supporting package
+# wasn't shipped alongside the script.
+def _ensure_geometry():
+    try:
+        from common.geometry import (
+            clamp,
+            length,
+            normalize,
+            seg_intersect,
+            ray_rect_nearest_hit,
+            los_blocked,
+        )
+        return clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked
+    except ModuleNotFoundError:
+        import importlib.util, os, textwrap
+
+        geom_src = textwrap.dedent(
+            '''
+            # Minimal geometry helpers auto-installed by Stealth Golf
+
+            def clamp(v, lo, hi):
+                return lo if v < lo else hi if v > hi else v
+
+            def length(vx, vy):
+                return (vx * vx + vy * vy) ** 0.5
+
+            def normalize(vx, vy):
+                l = length(vx, vy)
+                return (0.0, 0.0) if l == 0 else (vx / l, vy / l)
+
+            def seg_intersect(p1, p2, p3, p4):
+                x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
+                den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+                if abs(den) < 1e-9:
+                    return (False, 0, 0, 0, 0)
+                t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
+                u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den
+                if 0 <= t <= 1 and 0 <= u <= 1:
+                    ix = x1 + t * (x2 - x1); iy = y1 + t * (y2 - y1)
+                    return (True, t, u, ix, iy)
+                return (False, 0, 0, 0, 0)
+
+            def ray_rect_nearest_hit(ox, oy, dirx, diry, rect):
+                rx, ry, rw, rh = rect
+                farx = ox + dirx * 99999
+                fary = oy + diry * 99999
+                best_t = None
+                best_pt = None
+                edges = [
+                    ((rx, ry), (rx + rw, ry)),
+                    ((rx + rw, ry), (rx + rw, ry + rh)),
+                    ((rx + rw, ry + rh), (rx, ry + rh)),
+                    ((rx, ry + rh), (rx, ry)),
+                ]
+                for a, b in edges:
+                    hit, t, u, ix, iy = seg_intersect((ox, oy), (farx, fary), a, b)
+                    if hit and (best_t is None or t < best_t):
+                        best_t = t
+                        best_pt = (ix, iy)
+                return best_pt
+
+            def los_blocked(ox, oy, tx, ty, walls):
+                for rx, ry, rw, rh in walls:
+                    edges = [
+                        ((rx, ry), (rx + rw, ry)),
+                        ((rx + rw, ry), (rx + rw, ry + rh)),
+                        ((rx + rw, ry + rh), (rx, ry + rh)),
+                        ((rx, ry + rh), (rx, ry)),
+                    ]
+                    for a, b in edges:
+                        hit, t, u, ix, iy = seg_intersect((ox, oy), (tx, ty), a, b)
+                        if hit and 0 < t < 1 - 1e-6:
+                            return True
+                return False
+            '''
+        )
+
+        os.makedirs("common", exist_ok=True)
+        init_path = os.path.join("common", "__init__.py")
+        if not os.path.exists(init_path):
+            open(init_path, "w").close()
+        geom_path = os.path.join("common", "geometry.py")
+        with open(geom_path, "w", encoding="utf-8") as f:
+            f.write(geom_src)
+
+        spec = importlib.util.spec_from_file_location("common.geometry", geom_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return (
+            module.clamp,
+            module.length,
+            module.normalize,
+            module.seg_intersect,
+            module.ray_rect_nearest_hit,
+            module.los_blocked,
+        )
+
+clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked = _ensure_geometry()
 
 # Try not to crash if Window isn't available (e.g., packaging env)
 try:
@@ -149,11 +241,13 @@ class Agent:
         self.look_dirx, self.look_diry = normalize(bx-ax, by-ay)
         self.chasing = False
         self.ray_steps = 56
+        self.turn_timer = 0.0
+        self.turn_duration = 0.4
     def _angle_dir(self):
         from math import atan2
         return atan2(self.look_diry, self.look_dirx)
     def update(self, dt, ball, walls):
-        from math import cos
+        from math import cos, sin
         hidden = ball.smoke_timer > 0.0
         ball_visible = False
         if not hidden:
@@ -174,21 +268,32 @@ class Agent:
                 self.y += vyn * self.chase_speed * dt
                 self.look_dirx, self.look_diry = vxn, vyn
         else:
-            tx = self.bx if self.dir > 0 else self.ax
-            ty = self.by if self.dir > 0 else self.ay
-            vx, vy = tx - self.x, ty - self.y
-            dist = length(vx, vy)
-            step = self.patrol_speed * dt
-            if dist <= step:
-                self.x, self.y = tx, ty; self.dir *= -1
-                if self.dir > 0:
-                    self.look_dirx, self.look_diry = normalize(self.bx-self.ax, self.by-self.ay)
-                else:
-                    self.look_dirx, self.look_diry = normalize(self.ax-self.bx, self.ay-self.by)
+            if self.turn_timer > 0.0:
+                ang = pi * (dt / self.turn_duration)
+                c, s = cos(ang), sin(ang)
+                lx, ly = self.look_dirx, self.look_diry
+                self.look_dirx = lx * c - ly * s
+                self.look_diry = lx * s + ly * c
+                self.turn_timer = max(0.0, self.turn_timer - dt)
+                if self.turn_timer <= 0.0:
+                    if self.dir > 0:
+                        self.look_dirx, self.look_diry = normalize(self.bx-self.ax, self.by-self.ay)
+                    else:
+                        self.look_dirx, self.look_diry = normalize(self.ax-self.bx, self.ay-self.by)
             else:
-                vxn, vyn = (vx/dist, vy/dist) if dist else (0, 0)
-                self.x += vxn * step; self.y += vyn * step
-                self.look_dirx, self.look_diry = vxn, vyn
+                tx = self.bx if self.dir > 0 else self.ax
+                ty = self.by if self.dir > 0 else self.ay
+                vx, vy = tx - self.x, ty - self.y
+                dist = length(vx, vy)
+                step = self.patrol_speed * dt
+                if dist <= step:
+                    self.x, self.y = tx, ty
+                    self.dir *= -1
+                    self.turn_timer = self.turn_duration
+                else:
+                    vxn, vyn = (vx/dist, vy/dist) if dist else (0, 0)
+                    self.x += vxn * step; self.y += vyn * step
+                    self.look_dirx, self.look_diry = vxn, vyn
         return length(ball.x - self.x, ball.y - self.y) <= (ball.r + 10)
     def compute_flashlight_polygon(self, walls):
         from math import cos, sin
@@ -318,6 +423,9 @@ class StealthGolf(Widget):
         f = self.floors[idx]
         self.walls = [tuple(r) for r in f.get("walls", [])]
         self.decor_walls = set()
+    def _apply_floor(self, idx):
+        f = self.floors[idx]
+        self.walls = [tuple(r) for r in f.get("walls", [])]
         # Decor
         self.decor = []
         collidable = {"plant", "desk", "chair", "table"}
@@ -335,6 +443,22 @@ class StealthGolf(Widget):
                 rect_t = tuple(rect)
                 self.walls.append(rect_t)
                 self.decor_walls.add(rect_t)
+                color = d.get("color")
+                shape = d.get("shape")
+            elif isinstance(d, (list, tuple)) and len(d) >= 2:
+                kind, rect = d[0], d[1]
+                color = d[2] if len(d) > 2 else None
+                shape = d[3] if len(d) > 3 else None
+            else:
+                continue
+            decor_item = {"kind": kind, "rect": list(rect)}
+            if color is not None:
+                decor_item["color"] = color
+            if shape is not None:
+                decor_item["shape"] = shape
+            self.decor.append(decor_item)
+            if kind in collidable:
+                self.walls.append(tuple(rect))
         # Stairs
         self.stairs = []
         for s in f.get("stairs", []):
@@ -554,6 +678,15 @@ class StealthGolf(Widget):
                     y = ry + (i/steps)*rh
                     Line(points=[rx, y, rx+rw, y], width=1)
             # Decor
+        with self.canvas:
+            PushMatrix(); Translate(-self.cam_x, -self.cam_y, 0)
+            # BG
+            Color(0.08,0.09,0.11,1); Rectangle(pos=(0,0), size=(self.world_w, self.world_h))
+            # Grid
+            Color(0.12,0.13,0.16,1); grid=60
+            for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
+            for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
+            # Decor
             for d in self.decor:
                 kind = d.get("kind", "")
                 rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])
@@ -582,6 +715,47 @@ class StealthGolf(Widget):
                 elif kind == "table":
                     Color(0.55,0.42,0.28,1); Rectangle(pos=(rx, ry), size=(rw, rh))
                     Color(0.4,0.32,0.22,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+                    Color(0.16,0.4,0.18,1); Ellipse(pos=(rx, ry), size=(rw, rh))
+                    Color(0.2,0.25,0.2,1); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.45,0.33,0.18,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.1,0.1,0.1,1); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
+                    Color(0.2,0.2,0.2,1); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                    Color(0.3,0.3,0.3,1); Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.25,0.25,0.3,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.15,0.15,0.2,1); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.4,0.3,0.2,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.3,0.22,0.15,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+                else:
+                    col = d.get("color", [0.3, 0.3, 0.35, 1])
+                    if len(col) == 3:
+                        Color(col[0], col[1], col[2], 1)
+                    else:
+                        Color(*col)
+                    shape = d.get("shape", "rect")
+                    if shape == "ellipse":
+                        Ellipse(pos=(rx, ry), size=(rw, rh))
+                    else:
+                        Rectangle(pos=(rx, ry), size=(rw, rh))
+            # Stairs
+            for s in self.stairs:
+                rx, ry, rw, rh = s["rect"]
+                steps = 6
+                if s["dir"] == "up":
+                    Color(0.8,0.8,0.8,1)
+                else:
+                    Color(0.4,0.4,0.4,1)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(0.3,0.3,0.3,1)
+                for i in range(steps):
+                    y = ry + (i/steps)*rh
+                    Line(points=[rx, y, rx+rw, y], width=1)
+            # Walls
+            Color(0.25,0.28,0.33,1)
+            for rx,ry,rw,rh in self.walls: Rectangle(pos=(rx,ry), size=(rw,rh))
+
             # Lights (occluded)
             for a in self.agents:
                 pts = a.compute_flashlight_polygon(self.walls)
