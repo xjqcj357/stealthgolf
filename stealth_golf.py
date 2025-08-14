@@ -8,6 +8,7 @@ from math import sin, cos, atan2, sqrt, radians, pi
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.core.image import Image as CoreImage
 from kivy.graphics import Color, Ellipse, Rectangle, Line, Triangle, PushMatrix, PopMatrix, Translate, Mesh
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
@@ -29,6 +30,15 @@ except Exception:
 # --------------------------------- Config ------------------------------------
 LEVEL_CANDIDATES = ["stealth_level.json", "level.json"]  # initial
 MAX_LEVEL_INDEX = 18
+
+# Decor spritesheet (4x4 grid)
+DECOR_SPRITE_SHEET = "sprites/furniture.png"
+DECOR_SPRITE_CELLS = {
+    "plant": (0, 0),        # row 1 col 1
+    "desk": (0, 1),         # row 1 col 2 (computer desk)
+    "chair": (1, 0),        # row 2 col 1 (office chair)
+    "table": (1, 1),        # row 2 col 2
+}
 
 # Low-speed damping (tiny cap): below this speed, apply extra damping so ball stops soon
 LOW_SPEED_THRESHOLD = 140.0  # px/s
@@ -248,6 +258,10 @@ class StealthGolf(Widget):
 
         self._apply_level_data(data)
 
+        # Cache for decor textures
+        self._decor_textures = {}
+        self._decor_sheet = None
+
         # Input/aim
         self.aiming=False; self.aim_touch_id=None
         self.aim_start=(0,0); self.aim_current=(0,0)
@@ -337,12 +351,20 @@ class StealthGolf(Widget):
             if isinstance(d, dict):
                 kind = d.get("kind", "")
                 rect = d.get("rect", [0, 0, 0, 0])
-                self.decor.append({"kind": kind, "rect": rect})
-            elif isinstance(d, (list, tuple)) and len(d) == 2:
-                kind, rect = d
-                self.decor.append({"kind": kind, "rect": list(rect)})
+                color = d.get("color")
+                shape = d.get("shape")
+            elif isinstance(d, (list, tuple)) and len(d) >= 2:
+                kind, rect = d[0], d[1]
+                color = d[2] if len(d) > 2 else None
+                shape = d[3] if len(d) > 3 else None
             else:
                 continue
+            decor_item = {"kind": kind, "rect": list(rect)}
+            if color is not None:
+                decor_item["color"] = color
+            if shape is not None:
+                decor_item["shape"] = shape
+            self.decor.append(decor_item)
             if kind in collidable:
                 self.walls.append(tuple(rect))
         # Stairs
@@ -533,6 +555,37 @@ class StealthGolf(Widget):
         self.cam_y = clamp(desired_cy, 0, self.world_h - self.height)
     def screen_to_world(self, sx, sy): return (sx + self.cam_x, sy + self.cam_y)
 
+    # ------------- Decor helpers -------------
+    def _get_sprite_texture(self, kind):
+        tex = self._decor_textures.get(kind)
+        if tex is not None:
+            return tex
+        cell = DECOR_SPRITE_CELLS.get(kind)
+        if cell is None:
+            self._decor_textures[kind] = None
+            return None
+        if self._decor_sheet is None:
+            path = _find_first_existing([DECOR_SPRITE_SHEET])
+            if path:
+                try:
+                    self._decor_sheet = CoreImage(path).texture
+                except Exception:
+                    self._decor_sheet = None
+            else:
+                self._decor_sheet = None
+        sheet = self._decor_sheet
+        if not sheet:
+            self._decor_textures[kind] = None
+            return None
+        cols = rows = 4
+        cell_w = sheet.width / cols
+        cell_h = sheet.height / rows
+        row, col = cell
+        # Kivy textures use bottom-left origin
+        tex = sheet.get_region(col * cell_w, sheet.height - (row + 1) * cell_h, cell_w, cell_h)
+        self._decor_textures[kind] = tex
+        return tex
+
     # ------------- Draw -------------
     def draw(self):
         self.canvas.clear()
@@ -548,7 +601,10 @@ class StealthGolf(Widget):
             for d in self.decor:
                 kind = d.get("kind", "")
                 rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])
-                if kind == "elevator":
+                tex = self._get_sprite_texture(kind)
+                if tex:
+                    Rectangle(texture=tex, pos=(rx, ry), size=(rw, rh))
+                elif kind == "elevator":
                     Color(0.18, 0.2, 0.24, 1); Rectangle(pos=(rx, ry), size=(rw, rh))
                     Color(0.26, 0.28, 0.32, 1); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
                 elif kind == "rug":
@@ -559,20 +615,17 @@ class StealthGolf(Widget):
                     for i in range(4):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
-                elif kind == "plant":
-                    Color(0.16,0.4,0.18,1); Ellipse(pos=(rx, ry), size=(rw, rh))
-                    Color(0.2,0.25,0.2,1); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
-                elif kind == "desk":
-                    Color(0.45,0.33,0.18,1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.1,0.1,0.1,1); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
-                    Color(0.2,0.2,0.2,1); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
-                    Color(0.3,0.3,0.3,1); Rectangle(pos=(rx+5, ry+10), size=(50,8))
-                elif kind == "chair":
-                    Color(0.25,0.25,0.3,1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.15,0.15,0.2,1); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
-                elif kind == "table":
-                    Color(0.4,0.3,0.2,1); Rectangle(pos=(rx, ry), size=(rw, rh))
-                    Color(0.3,0.22,0.15,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+                else:
+                    col = d.get("color", [0.3, 0.3, 0.35, 1])
+                    if len(col) == 3:
+                        Color(col[0], col[1], col[2], 1)
+                    else:
+                        Color(*col)
+                    shape = d.get("shape", "rect")
+                    if shape == "ellipse":
+                        Ellipse(pos=(rx, ry), size=(rw, rh))
+                    else:
+                        Rectangle(pos=(rx, ry), size=(rw, rh))
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]

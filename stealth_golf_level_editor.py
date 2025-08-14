@@ -9,6 +9,7 @@ import json, os
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.clock import Clock
+from kivy.core.image import Image as CoreImage
 from kivy.graphics import Color, Rectangle, Ellipse, Line, PushMatrix, PopMatrix, Translate, Mesh
 from kivy.uix.widget import Widget
 from kivy.uix.boxlayout import BoxLayout
@@ -26,6 +27,33 @@ except Exception:
 GRID = 20
 
 def snap(v): return int(round(v / GRID)) * GRID
+
+# Decor spritesheet (4x4 grid)
+DECOR_SPRITE_SHEET = "sprites/furniture.png"
+DECOR_SPRITE_CELLS = {
+    "plant": (0, 0),
+    "desk": (0, 1),
+    "chair": (1, 0),
+    "table": (1, 1),
+}
+
+def _search_paths(names):
+    out = []
+    try:
+        script_dir = os.path.dirname(__file__)
+    except NameError:
+        script_dir = None
+    for name in names:
+        out.append(os.path.join(os.getcwd(), name))
+        if script_dir:
+            out.append(os.path.join(script_dir, name))
+    return out
+
+def _find_first_existing(names):
+    for p in _search_paths(names):
+        if os.path.exists(p):
+            return p
+    return None
 
 def floor_label(idx):
     return f"F{idx+1}" if idx >= 0 else f"B{-idx}"
@@ -55,6 +83,8 @@ class LevelCanvas(Widget):
         self.start_floor = 0
         self.hole = {"cx":1240, "cy":2020, "r":22}
         self.hole_floor = 0
+        self._decor_textures = {}
+        self._decor_sheet = None
         # Interaction
         self.tool = "Pan"
         self.dragging = False
@@ -116,6 +146,36 @@ class LevelCanvas(Widget):
 
     # --- Transforms ---
     def screen_to_world(self, sx, sy): return (sx + self.cam_x, sy + self.cam_y)
+
+    # --- Decor helpers ---
+    def _get_sprite_texture(self, kind):
+        tex = self._decor_textures.get(kind)
+        if tex is not None:
+            return tex
+        cell = DECOR_SPRITE_CELLS.get(kind)
+        if cell is None:
+            self._decor_textures[kind] = None
+            return None
+        if self._decor_sheet is None:
+            path = _find_first_existing([DECOR_SPRITE_SHEET])
+            if path:
+                try:
+                    self._decor_sheet = CoreImage(path).texture
+                except Exception:
+                    self._decor_sheet = None
+            else:
+                self._decor_sheet = None
+        sheet = self._decor_sheet
+        if not sheet:
+            self._decor_textures[kind] = None
+            return None
+        cols = rows = 4
+        cell_w = sheet.width / cols
+        cell_h = sheet.height / rows
+        row, col = cell
+        tex = sheet.get_region(col * cell_w, sheet.height - (row + 1) * cell_h, cell_w, cell_h)
+        self._decor_textures[kind] = tex
+        return tex
 
     # --- Events ---
     def on_touch_down(self, touch):
@@ -265,7 +325,10 @@ class LevelCanvas(Widget):
             # Decor
             for d in self.decor:
                 kind = d["kind"]; rx,ry,rw,rh = d["rect"]
-                if kind == "elevator":
+                tex = self._get_sprite_texture(kind)
+                if tex:
+                    Rectangle(texture=tex, pos=(rx,ry), size=(rw,rh))
+                elif kind == "elevator":
                     Color(0.18, 0.2, 0.24, 1.0)
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.26, 0.28, 0.32, 1.0)
@@ -280,30 +343,9 @@ class LevelCanvas(Widget):
                     for i in range(4):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
-                elif kind == "plant":
-                    Color(0.16,0.4,0.18,1.0)
-                    Ellipse(pos=(rx,ry), size=(rw,rh))
-                    Color(0.2,0.25,0.2,1.0)
-                    Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
-                elif kind == "desk":
-                    Color(0.45,0.33,0.18,1.0)
+                else:
+                    Color(0.3,0.3,0.35,1.0)
                     Rectangle(pos=(rx,ry), size=(rw,rh))
-                    Color(0.1,0.1,0.1,1.0)
-                    Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
-                    Color(0.2,0.2,0.2,1.0)
-                    Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
-                    Color(0.3,0.3,0.3,1.0)
-                    Rectangle(pos=(rx+5, ry+10), size=(50,8))
-                elif kind == "chair":
-                    Color(0.25,0.25,0.3,1.0)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
-                    Color(0.15,0.15,0.2,1.0)
-                    Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
-                elif kind == "table":
-                    Color(0.4,0.3,0.2,1.0)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
-                    Color(0.3,0.22,0.15,1.0)
-                    Line(rectangle=(rx,ry,rw,rh), width=1.2)
 
             # Stairs
             for r in self.stairs:
