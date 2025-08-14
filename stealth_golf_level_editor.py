@@ -15,6 +15,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.spinner import Spinner
 from common.geometry import length, normalize, seg_intersect, ray_rect_nearest_hit
 
 try:
@@ -25,6 +26,16 @@ except Exception:
 GRID = 20
 
 def snap(v): return int(round(v / GRID)) * GRID
+
+def floor_label(idx):
+    return f"F{idx+1}" if idx >= 0 else f"B{-idx}"
+
+def label_to_floor_index(label):
+    if label.startswith("F") and label[1:].isdigit():
+        return int(label[1:]) - 1
+    if label.startswith("B") and label[1:].isdigit():
+        return -int(label[1:])
+    return 0
 
 class LevelCanvas(Widget):
     def __init__(self, **kwargs):
@@ -208,6 +219,8 @@ class LevelCanvas(Widget):
                     dest = self.floors[target]
                     opp = "down" if direction=="up" else "up"
                     dest["stairs"].append({"dir":opp, "rect":[x,y,w,h], "target": self.current_floor})
+            if hasattr(self.parent, '_update_floor_spinner'):
+                self.parent._update_floor_spinner()
             self.temp_rect = None; self.dragging = False; return True
 
         if self.tool == "Pan":
@@ -350,7 +363,7 @@ class LevelCanvas(Widget):
         if not self.status:
             self.status = Label(text="", font_size=14, color=(1,1,1,1), size_hint=(None,None), pos=(10, 8))
             self.add_widget(self.status)
-        self.status.text = f"Floor {self.current_floor}  •  Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..0=Tools, V=Vent)"
+        self.status.text = f"Floor {floor_label(self.current_floor)}  •  Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..0=Tools, V=Vent)"
         self.status.markup = True
 
 class LevelEditorRoot(FloatLayout):
@@ -378,20 +391,35 @@ class LevelEditorRoot(FloatLayout):
         tools = ["Pan","Wall","Agent","Start","Hole","Elevator","Rug","Vent","StairUp","StairDown","Erase"]
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
-        # Save/Load/Clear/Floor
-        for name in ("Save","Load","Clear","Floor"):
-            self.toolbar.add_widget(self._tool_button(name))
+
+        self.toolbar.add_widget(self._tool_button("Save"))
+
+        self.load_spinner = Spinner(text="Load", values=(), size_hint=(None,1), width=160)
+        self.load_spinner.bind(text=self._on_load_select)
+        self.toolbar.add_widget(self.load_spinner)
+
+        self.toolbar.add_widget(self._tool_button("Clear"))
+
+        self.floor_spinner = Spinner(text="F1", values=(), size_hint=(None,1), width=100)
+        self.floor_spinner.bind(text=self._on_floor_select)
+        self.toolbar.add_widget(self.floor_spinner)
+
+        self._update_load_spinner()
+        self._update_floor_spinner()
 
     def _select_tool(self, name):
-        if name in ("Save","Load","Clear","Floor"):
+        if name in ("Save","Load","Clear"):
             if name == "Save":
                 path = "stealth_level.json"
                 self.canvas_view.save_json(path)
                 self.canvas_view.status.text = f"Saved to {path}"
+                self._update_load_spinner()
             elif name == "Load":
-                path = "stealth_level.json"
-                ok = self.canvas_view.load_json(path)
-                self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {path}"
+                filename = self.load_spinner.text
+                if filename != "Load":
+                    ok = self.canvas_view.load_json(filename)
+                    self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {filename}"
+                    self._update_floor_spinner()
             elif name == "Clear":
                 self.canvas_view.floors = [self.canvas_view._new_floor()]
                 self.canvas_view.current_floor = 0
@@ -401,10 +429,7 @@ class LevelEditorRoot(FloatLayout):
                 self.canvas_view.hole_floor = 0
                 self.canvas_view._refresh_floor_refs()
                 self.canvas_view.status.text = "Cleared."
-            elif name == "Floor":
-                self.canvas_view.current_floor = (self.canvas_view.current_floor + 1) % len(self.canvas_view.floors)
-                self.canvas_view._refresh_floor_refs()
-                self.canvas_view.status.text = f"Floor {self.canvas_view.current_floor}"
+                self._update_floor_spinner()
             return
         self.canvas_view.tool = name
         # cancel in-progress operations
@@ -433,6 +458,33 @@ class LevelEditorRoot(FloatLayout):
         if codepoint in ('v','V'):
             self._select_tool("Vent"); return True
         return False
+
+    def _find_levels(self):
+        return sorted([f for f in os.listdir('.') if f.endswith('.json')])
+
+    def _update_load_spinner(self):
+        if hasattr(self, 'load_spinner'):
+            self.load_spinner.values = self._find_levels()
+
+    def _on_load_select(self, spinner, text):
+        if text == "Load":
+            return
+        ok = self.canvas_view.load_json(text)
+        self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {text}"
+        self._update_floor_spinner()
+
+    def _update_floor_spinner(self):
+        if hasattr(self, 'floor_spinner'):
+            vals = [floor_label(i) for i in range(len(self.canvas_view.floors))]
+            self.floor_spinner.values = vals
+            self.floor_spinner.text = floor_label(self.canvas_view.current_floor)
+
+    def _on_floor_select(self, spinner, text):
+        idx = label_to_floor_index(text)
+        if 0 <= idx < len(self.canvas_view.floors):
+            self.canvas_view.current_floor = idx
+            self.canvas_view._refresh_floor_refs()
+            self.canvas_view.status.text = f"Floor {text}"
 
 class LevelEditorApp(App):
     def build(self):
