@@ -12,14 +12,106 @@ from kivy.core.image import Image as CoreImage
 from kivy.graphics import Color, Ellipse, Rectangle, Line, Triangle, PushMatrix, PopMatrix, Translate, Mesh
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
-from common.geometry import (
-    clamp,
-    length,
-    normalize,
-    seg_intersect,
-    ray_rect_nearest_hit,
-    los_blocked,
-)
+# Ensure ``common.geometry`` is available.  If the package is missing, a
+# minimal copy of the helpers is written to ``common/geometry.py`` and then
+# imported.  This allows the game to start even when the supporting package
+# wasn't shipped alongside the script.
+def _ensure_geometry():
+    try:
+        from common.geometry import (
+            clamp,
+            length,
+            normalize,
+            seg_intersect,
+            ray_rect_nearest_hit,
+            los_blocked,
+        )
+        return clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked
+    except ModuleNotFoundError:
+        import importlib.util, os, textwrap
+
+        geom_src = textwrap.dedent(
+            '''
+            # Minimal geometry helpers auto-installed by Stealth Golf
+
+            def clamp(v, lo, hi):
+                return lo if v < lo else hi if v > hi else v
+
+            def length(vx, vy):
+                return (vx * vx + vy * vy) ** 0.5
+
+            def normalize(vx, vy):
+                l = length(vx, vy)
+                return (0.0, 0.0) if l == 0 else (vx / l, vy / l)
+
+            def seg_intersect(p1, p2, p3, p4):
+                x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
+                den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+                if abs(den) < 1e-9:
+                    return (False, 0, 0, 0, 0)
+                t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
+                u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den
+                if 0 <= t <= 1 and 0 <= u <= 1:
+                    ix = x1 + t * (x2 - x1); iy = y1 + t * (y2 - y1)
+                    return (True, t, u, ix, iy)
+                return (False, 0, 0, 0, 0)
+
+            def ray_rect_nearest_hit(ox, oy, dirx, diry, rect):
+                rx, ry, rw, rh = rect
+                farx = ox + dirx * 99999
+                fary = oy + diry * 99999
+                best_t = None
+                best_pt = None
+                edges = [
+                    ((rx, ry), (rx + rw, ry)),
+                    ((rx + rw, ry), (rx + rw, ry + rh)),
+                    ((rx + rw, ry + rh), (rx, ry + rh)),
+                    ((rx, ry + rh), (rx, ry)),
+                ]
+                for a, b in edges:
+                    hit, t, u, ix, iy = seg_intersect((ox, oy), (farx, fary), a, b)
+                    if hit and (best_t is None or t < best_t):
+                        best_t = t
+                        best_pt = (ix, iy)
+                return best_pt
+
+            def los_blocked(ox, oy, tx, ty, walls):
+                for rx, ry, rw, rh in walls:
+                    edges = [
+                        ((rx, ry), (rx + rw, ry)),
+                        ((rx + rw, ry), (rx + rw, ry + rh)),
+                        ((rx + rw, ry + rh), (rx, ry + rh)),
+                        ((rx, ry + rh), (rx, ry)),
+                    ]
+                    for a, b in edges:
+                        hit, t, u, ix, iy = seg_intersect((ox, oy), (tx, ty), a, b)
+                        if hit and 0 < t < 1 - 1e-6:
+                            return True
+                return False
+            '''
+        )
+
+        os.makedirs("common", exist_ok=True)
+        init_path = os.path.join("common", "__init__.py")
+        if not os.path.exists(init_path):
+            open(init_path, "w").close()
+        geom_path = os.path.join("common", "geometry.py")
+        with open(geom_path, "w", encoding="utf-8") as f:
+            f.write(geom_src)
+
+        spec = importlib.util.spec_from_file_location("common.geometry", geom_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return (
+            module.clamp,
+            module.length,
+            module.normalize,
+            module.seg_intersect,
+            module.ray_rect_nearest_hit,
+            module.los_blocked,
+        )
+
+clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked = _ensure_geometry()
 
 # Try not to crash if Window isn't available (e.g., packaging env)
 try:
@@ -605,6 +697,11 @@ class StealthGolf(Widget):
                 if tex:
                     Rectangle(texture=tex, pos=(rx, ry), size=(rw, rh))
                 elif kind == "elevator":
+            # Decor
+            for d in self.decor:
+                kind = d.get("kind", "")
+                rx, ry, rw, rh = d.get("rect", [0, 0, 0, 0])
+                if kind == "elevator":
                     Color(0.18, 0.2, 0.24, 1); Rectangle(pos=(rx, ry), size=(rw, rh))
                     Color(0.26, 0.28, 0.32, 1); Rectangle(pos=(rx + rw/2 - 2, ry + 10), size=(4, rh - 20))
                 elif kind == "rug":
@@ -615,6 +712,20 @@ class StealthGolf(Widget):
                     for i in range(4):
                         y = ry + (i+1)*rh/5
                         Line(points=[rx, y, rx+rw, y], width=1)
+                elif kind == "plant":
+                    Color(0.16,0.4,0.18,1); Ellipse(pos=(rx, ry), size=(rw, rh))
+                    Color(0.2,0.25,0.2,1); Rectangle(pos=(rx + rw*0.35, ry), size=(rw*0.3, rh*0.25))
+                elif kind == "desk":
+                    Color(0.45,0.33,0.18,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.1,0.1,0.1,1); Rectangle(pos=(rx+5, ry+rh-25), size=(40,20))
+                    Color(0.2,0.2,0.2,1); Rectangle(pos=(rx+5, ry+rh-35), size=(40,5))
+                    Color(0.3,0.3,0.3,1); Rectangle(pos=(rx+5, ry+10), size=(50,8))
+                elif kind == "chair":
+                    Color(0.25,0.25,0.3,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.15,0.15,0.2,1); Rectangle(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "table":
+                    Color(0.4,0.3,0.2,1); Rectangle(pos=(rx, ry), size=(rw, rh))
+                    Color(0.3,0.22,0.15,1); Line(rectangle=(rx, ry, rw, rh), width=1.2)
                 else:
                     col = d.get("color", [0.3, 0.3, 0.35, 1])
                     if len(col) == 3:
