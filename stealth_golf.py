@@ -163,11 +163,11 @@ def _extract_index_from_name(path):
 
 # ------------------------------- Game Model ----------------------------------
 class Ball:
-    def __init__(self, x, y, r=14):
+    def __init__(self, x, y, r=14, color=(0.95, 0.95, 0.95, 1)):
         self.x, self.y = x, y
         self.vx, self.vy = 0.0, 0.0
         self.r = r
-        self.color = (0.95, 0.95, 0.95)
+        self.color = color
         self.smoke_timer = 0.0
         self.in_motion = False
 
@@ -409,7 +409,7 @@ class StealthGolf(Widget):
         self._apply_floor(self.current_floor)
 
         # Entities
-        self.ball = Ball(*self.start_pos)
+        self.ball = Ball(*self.start_pos, color=App.get_running_app().selected_color)
 
         # Camera reset
         self.cam_x = 0
@@ -722,7 +722,7 @@ class StealthGolf(Widget):
             if self.ball.smoke_timer > 0:
                 Color(0.35,0.35,0.38,1)
             else:
-                Color(0.95,0.95,0.95,1)
+                Color(*self.ball.color)
             Ellipse(pos=(self.ball.x-14, self.ball.y-14), size=(28,28))
             # Aim line
             if self.aiming:
@@ -770,9 +770,128 @@ class StealthGolf(Widget):
         for a in self.agents:
             a.x,a.y = a.ax,a.ay; a.dir=1; a.chasing=False; a.look_dirx, a.look_diry = normalize(a.bx-a.ax, a.by-a.ay)
 
+# ----------------------------- Screens & App ---------------------------------
+
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.button import Button
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+
+
+class StartMenuScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
+        play_btn = Button(text="Play", size_hint=(1, None), height=80)
+        skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
+        play_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "game"))
+        skins_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "skins"))
+        layout.add_widget(play_btn)
+        layout.add_widget(skins_btn)
+        self.add_widget(layout)
+
+
+class SkinMenuScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.app = App.get_running_app()
+        root = BoxLayout(orientation="vertical", padding=20, spacing=20)
+        self.preview = Widget(size_hint=(1, None), height=120)
+        self.preview.bind(pos=self._draw_preview, size=self._draw_preview)
+        root.add_widget(self.preview)
+        self.colors = [
+            (1, 0, 0, 1),
+            (0, 1, 0, 1),
+            (0, 0, 1, 1),
+            (1, 1, 0, 1),
+            (1, 0, 1, 1),
+            (0, 1, 1, 1),
+            (1, 0.5, 0, 1),
+        ]
+        grid = GridLayout(cols=4, spacing=10, size_hint=(1, None), height=200)
+        for c in self.colors:
+            btn = Button(background_normal="", background_color=c)
+            btn.bind(on_release=lambda _btn, col=c: self.select_color(col))
+            grid.add_widget(btn)
+        root.add_widget(grid)
+        btn_box = BoxLayout(size_hint=(1, None), height=60, spacing=10)
+        back_btn = Button(text="Back")
+        ok_btn = Button(text="OK")
+        back_btn.bind(on_release=self.on_back)
+        ok_btn.bind(on_release=self.on_ok)
+        btn_box.add_widget(back_btn)
+        btn_box.add_widget(ok_btn)
+        root.add_widget(btn_box)
+        self.add_widget(root)
+
+    def on_pre_enter(self, *args):
+        self.original_color = self.app.selected_color
+        self._draw_preview()
+
+    def select_color(self, color):
+        self.app.selected_color = color
+        self._draw_preview()
+
+    def _draw_preview(self, *args):
+        self.preview.canvas.clear()
+        with self.preview.canvas:
+            Color(*self.app.selected_color)
+            size = 80
+            x = self.preview.center_x - size / 2
+            y = self.preview.center_y - size / 2
+            Ellipse(pos=(x, y), size=(size, size))
+
+    def on_ok(self, *args):
+        self.app.save_selected_color()
+        self.manager.current = "start"
+
+    def on_back(self, *args):
+        self.app.selected_color = getattr(self, "original_color", self.app.selected_color)
+        self.manager.current = "start"
+
+
+class GameScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.game = None
+
+    def on_enter(self, *args):
+        if self.game:
+            self.remove_widget(self.game)
+        self.game = StealthGolf()
+        self.add_widget(self.game)
+
+
 class StealthGolfApp(App):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.config_path = os.path.join(os.path.dirname(__file__), "skin_config.json")
+        self.selected_color = (0.95, 0.95, 0.95, 1)
+        self._load_selected_color()
+
+    def _load_selected_color(self):
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            col = data.get("selected_color")
+            if isinstance(col, (list, tuple)) and len(col) in (3, 4):
+                self.selected_color = tuple(col)
+        except Exception:
+            pass
+
+    def save_selected_color(self):
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump({"selected_color": self.selected_color}, f)
+        except Exception:
+            pass
+
     def build(self):
-        return StealthGolf()
+        sm = ScreenManager()
+        sm.add_widget(StartMenuScreen(name="start"))
+        sm.add_widget(SkinMenuScreen(name="skins"))
+        sm.add_widget(GameScreen(name="game"))
+        return sm
 
 if __name__ == "__main__":
     StealthGolfApp().run()
