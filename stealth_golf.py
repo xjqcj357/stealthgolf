@@ -5,6 +5,7 @@
 #
 import json, os, sys, runpy
 from math import sin, cos, atan2, sqrt, radians, pi
+from functools import partial
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -792,11 +793,30 @@ class StartMenuScreen(Screen):
         layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
         play_btn = Button(text="Play", size_hint=(1, None), height=80)
         skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
+
+        for btn in (play_btn, skins_btn):
+            with btn.canvas.before:
+                Color(1, 1, 1, 1)
+                btn._outline = Line(
+                    rectangle=(btn.x - 2, btn.y - 2, btn.width + 4, btn.height + 4),
+                    width=2,
+                )
+            update = partial(self._update_outline, btn)
+            btn.bind(pos=update, size=update)
+
         play_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "game"))
         skins_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "skins"))
         layout.add_widget(play_btn)
         layout.add_widget(skins_btn)
         self.add_widget(layout)
+
+    def _update_outline(self, btn, *args):
+        btn._outline.rectangle = (
+            btn.x - 2,
+            btn.y - 2,
+            btn.width + 4,
+            btn.height + 4,
+        )
 
 
 class SkinMenuScreen(Screen):
