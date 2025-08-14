@@ -4,6 +4,7 @@
 # 2) auto-load next level up to 18: tries stealth_level_{n}.json, level_{n}.json, then .py
 #
 import json, os, sys, runpy
+import random
 from math import sin, cos, atan2, sqrt, radians, pi
 from kivy.app import App
 from kivy.clock import Clock
@@ -126,6 +127,9 @@ MAX_LEVEL_INDEX = 18
 LOW_SPEED_THRESHOLD = 140.0  # px/s
 LOW_SPEED_DAMP_BASE = 0.78   # stronger damping baseline when very slow (per 60 FPS frame)
 LOW_SPEED_DAMP_NEAR = 0.92   # gentler damping near threshold (per 60 FPS frame)
+
+# Fade speed when transitioning via stairs (1 / 0.5s)
+STAIR_FADE_SPEED = 2.0
 
 # -------------------------------- Utilities ----------------------------------
 
@@ -347,10 +351,12 @@ class StealthGolf(Widget):
         self.caught=False; self.win=False; self.message_timer=0.0
         self.drop_total=0.9; self.drop_timer=0.0
 
-        # Ramp transition state
+        # Transition state
         self.fade_alpha = 0.0
-        self.fade_phase = None  # None, 'out', 'in'
+        self.fade_phase = None  # level fade: None, 'out', 'in'
         self.fade_target = None
+        self.floor_fade_phase = None
+        self.floor_fade_target = None
         self.transition_dir = 0  # +1 up, -1 down
         self.transition_cooldown = 0.0
 
@@ -581,6 +587,17 @@ class StealthGolf(Widget):
             self.fade_alpha = max(0.0, self.fade_alpha - dt * fade_speed)
             if self.fade_alpha <= 0.0:
                 self.fade_phase = None
+        elif self.floor_fade_phase == 'out':
+            self.fade_alpha = min(1.0, self.fade_alpha + dt * STAIR_FADE_SPEED)
+            if self.fade_alpha >= 1.0:
+                self.current_floor = self.floor_fade_target
+                self._apply_floor(self.current_floor)
+                self.floor_fade_phase = 'in'
+                self.fade_alpha = 1.0
+        elif self.floor_fade_phase == 'in':
+            self.fade_alpha = max(0.0, self.fade_alpha - dt * STAIR_FADE_SPEED)
+            if self.fade_alpha <= 0.0:
+                self.floor_fade_phase = None
         else:
             if self.drop_timer > 0:
                 self.drop_timer = max(0.0, self.drop_timer - dt)
@@ -615,8 +632,9 @@ class StealthGolf(Widget):
                             if not self.on_stairs and self.transition_cooldown <= 0:
                                 target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
                                 if 0 <= target < len(self.floors):
-                                    self.current_floor = target
-                                    self._apply_floor(self.current_floor)
+                                    self.floor_fade_target = target
+                                    self.floor_fade_phase = 'out'
+                                    self.fade_alpha = 0.0
                                     self.transition_cooldown = 0.4
                                     self.on_stairs = True
                             break
@@ -734,7 +752,17 @@ class StealthGolf(Widget):
             Color(1,1,1,1); Line(rectangle=(self.width - 140, self.height - 60, 130, 48), width=1.2)
             # Fade overlay
             if self.fade_alpha > 0:
-                Color(0,0,0,self.fade_alpha); Rectangle(pos=(0,0), size=(self.width, self.height))
+                if self.floor_fade_phase:
+                    for _ in range(120):
+                        a = self.fade_alpha * random.random()
+                        size = 8
+                        Color(0, 0, 0, a)
+                        Rectangle(
+                            pos=(random.random() * (self.width - size), random.random() * (self.height - size)),
+                            size=(size, size),
+                        )
+                else:
+                    Color(0,0,0,self.fade_alpha); Rectangle(pos=(0,0), size=(self.width, self.height))
         self._labels()
 
     def _labels(self):
