@@ -412,7 +412,7 @@ class StealthGolf(Widget):
             Color(0.08,0.09,0.11,1); Rectangle(pos=(0,0), size=(self.world_w, self.world_h))
             # Grid
             Color(0.12,0.13,0.16,1); grid=60
-            for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2,self.world_w if False else self.world_h))
+            for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
             # Decor
             for d in self.decor:
