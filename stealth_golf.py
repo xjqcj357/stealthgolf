@@ -644,6 +644,10 @@ class StealthGolf(Widget):
             Color(0.12,0.13,0.16,1); grid=60
             for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
+            # Walls
+            Color(0.25,0.28,0.33,1)
+            for rx,ry,rw,rh in self.walls:
+                Rectangle(pos=(rx,ry), size=(rw,rh))
             # Decor
             for d in self.decor:
                 kind = d.get("kind", "")
@@ -697,9 +701,6 @@ class StealthGolf(Widget):
                 for i in range(steps):
                     y = ry + (i/steps)*rh
                     Line(points=[rx, y, rx+rw, y], width=1)
-            # Walls
-            Color(0.25,0.28,0.33,1)
-            for rx,ry,rw,rh in self.walls: Rectangle(pos=(rx,ry), size=(rw,rh))
             # Lights (occluded)
             for a in self.agents:
                 pts = a.compute_flashlight_polygon(self.walls)
