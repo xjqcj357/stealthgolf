@@ -174,12 +174,12 @@ class Ball:
     def apply_impulse(self, ix, iy):
         self.vx += ix; self.vy += iy; self.in_motion = True
 
-    def update(self, dt, walls):
+    def update(self, dt, colliders):
         # Integrate
         self.x += self.vx * dt; self.y += self.vy * dt
 
-        # Collide with walls
-        for rx, ry, rw, rh in walls:
+        # Collide with world geometry
+        for rx, ry, rw, rh in colliders:
             cx, cy, r = self.x, self.y, self.r
             closest_x = clamp(cx, rx, rx + rw)
             closest_y = clamp(cy, ry, ry + rh)
@@ -246,7 +246,7 @@ class Agent:
     def _angle_dir(self):
         from math import atan2
         return atan2(self.look_diry, self.look_dirx)
-    def update(self, dt, ball, walls):
+    def update(self, dt, ball, colliders):
         from math import cos, sin
         hidden = ball.smoke_timer > 0.0
         ball_visible = False
@@ -256,7 +256,7 @@ class Agent:
             if dist <= self.cone_len:
                 vxn, vyn = normalize(dx, dy)
                 ang_ok = (vxn*self.look_dirx + vyn*self.look_diry) >= cos(self.fov_half + 1e-6)
-                if ang_ok and not los_blocked(self.x, self.y, ball.x, ball.y, walls):
+                if ang_ok and not los_blocked(self.x, self.y, ball.x, ball.y, colliders):
                     ball_visible = True
         self.chasing = ball_visible
         if self.chasing:
@@ -295,7 +295,7 @@ class Agent:
                     self.x += vxn * step; self.y += vyn * step
                     self.look_dirx, self.look_diry = vxn, vyn
         return length(ball.x - self.x, ball.y - self.y) <= (ball.r + 10)
-    def compute_flashlight_polygon(self, walls):
+    def compute_flashlight_polygon(self, colliders):
         from math import cos, sin
         base_ang = self._angle_dir()
         start_ang = base_ang + self.fov_half
@@ -307,7 +307,7 @@ class Agent:
             dx, dy = cos(ang), sin(ang)
             hit_pt = None; nearest_d2 = None
             tx = self.x + dx * self.cone_len; ty = self.y + dy * self.cone_len
-            for rect in walls:
+            for rect in colliders:
                 pt = ray_rect_nearest_hit(self.x, self.y, dx, dy, rect)
                 if pt is not None:
                     d2 = (pt[0] - self.x)**2 + (pt[1] - self.y)**2
@@ -399,6 +399,7 @@ class StealthGolf(Widget):
             self.floors = [
                 {
                     "walls": [tuple(r) for r in data.get("walls", [])],
+                    "colliders": [tuple(r) for r in data.get("colliders", [])],
                     "decor": data.get("decor", []),
                     "agents": data.get("agents", []),
                     "stairs": data.get("ramps", []),
@@ -421,7 +422,14 @@ class StealthGolf(Widget):
 
     def _apply_floor(self, idx):
         f = self.floors[idx]
-        self.walls = [tuple(r) for r in f.get("walls", [])]
+        # Visible and collidable geometry
+        self.walls_drawn = [tuple(r) for r in f.get("walls", [])]
+        self.colliders = list(self.walls_drawn)
+
+        # Additional collision-only rectangles
+        for r in f.get("colliders", []):
+            self.colliders.append(tuple(r))
+
         # Decor
         self.decor = []
         collidable = {"plant", "desk", "chair", "table"}
@@ -444,7 +452,7 @@ class StealthGolf(Widget):
                 decor_item["shape"] = shape
             self.decor.append(decor_item)
             if kind in collidable:
-                self.walls.append(tuple(rect))
+                self.colliders.append(tuple(rect))
         # Stairs
         self.stairs = []
         for s in f.get("stairs", []):
@@ -591,9 +599,9 @@ class StealthGolf(Widget):
             else:
                 if self.transition_cooldown > 0:
                     self.transition_cooldown = max(0.0, self.transition_cooldown - dt)
-                self.ball.update(dt, self.walls)
+                self.ball.update(dt, self.colliders)
                 for a in self.agents:
-                    caught = a.update(dt, self.ball, self.walls)
+                    caught = a.update(dt, self.ball, self.colliders)
                     if caught and not self.win:
                         self.caught = True; self.message_timer = 2.0
                 # hole
@@ -646,7 +654,7 @@ class StealthGolf(Widget):
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
             # Walls
             Color(0.25,0.28,0.33,1)
-            for rx,ry,rw,rh in self.walls:
+            for rx,ry,rw,rh in self.walls_drawn:
                 Rectangle(pos=(rx,ry), size=(rw,rh))
             # Decor
             for d in self.decor:
@@ -703,7 +711,7 @@ class StealthGolf(Widget):
                     Line(points=[rx, y, rx+rw, y], width=1)
             # Lights (occluded)
             for a in self.agents:
-                pts = a.compute_flashlight_polygon(self.walls)
+                pts = a.compute_flashlight_polygon(self.colliders)
                 verts=[(a.x,a.y,0,0)] + [(x,y,0,0) for (x,y) in pts]
                 idx=[]; 
                 for i in range(1,len(verts)-1): idx.extend([0,i,i+1])
