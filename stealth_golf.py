@@ -149,11 +149,13 @@ class Agent:
         self.look_dirx, self.look_diry = normalize(bx-ax, by-ay)
         self.chasing = False
         self.ray_steps = 56
+        self.turn_timer = 0.0
+        self.turn_duration = 0.4
     def _angle_dir(self):
         from math import atan2
         return atan2(self.look_diry, self.look_dirx)
     def update(self, dt, ball, walls):
-        from math import cos
+        from math import cos, sin
         hidden = ball.smoke_timer > 0.0
         ball_visible = False
         if not hidden:
@@ -174,21 +176,32 @@ class Agent:
                 self.y += vyn * self.chase_speed * dt
                 self.look_dirx, self.look_diry = vxn, vyn
         else:
-            tx = self.bx if self.dir > 0 else self.ax
-            ty = self.by if self.dir > 0 else self.ay
-            vx, vy = tx - self.x, ty - self.y
-            dist = length(vx, vy)
-            step = self.patrol_speed * dt
-            if dist <= step:
-                self.x, self.y = tx, ty; self.dir *= -1
-                if self.dir > 0:
-                    self.look_dirx, self.look_diry = normalize(self.bx-self.ax, self.by-self.ay)
-                else:
-                    self.look_dirx, self.look_diry = normalize(self.ax-self.bx, self.ay-self.by)
+            if self.turn_timer > 0.0:
+                ang = pi * (dt / self.turn_duration)
+                c, s = cos(ang), sin(ang)
+                lx, ly = self.look_dirx, self.look_diry
+                self.look_dirx = lx * c - ly * s
+                self.look_diry = lx * s + ly * c
+                self.turn_timer = max(0.0, self.turn_timer - dt)
+                if self.turn_timer <= 0.0:
+                    if self.dir > 0:
+                        self.look_dirx, self.look_diry = normalize(self.bx-self.ax, self.by-self.ay)
+                    else:
+                        self.look_dirx, self.look_diry = normalize(self.ax-self.bx, self.ay-self.by)
             else:
-                vxn, vyn = (vx/dist, vy/dist) if dist else (0, 0)
-                self.x += vxn * step; self.y += vyn * step
-                self.look_dirx, self.look_diry = vxn, vyn
+                tx = self.bx if self.dir > 0 else self.ax
+                ty = self.by if self.dir > 0 else self.ay
+                vx, vy = tx - self.x, ty - self.y
+                dist = length(vx, vy)
+                step = self.patrol_speed * dt
+                if dist <= step:
+                    self.x, self.y = tx, ty
+                    self.dir *= -1
+                    self.turn_timer = self.turn_duration
+                else:
+                    vxn, vyn = (vx/dist, vy/dist) if dist else (0, 0)
+                    self.x += vxn * step; self.y += vyn * step
+                    self.look_dirx, self.look_diry = vxn, vyn
         return length(ball.x - self.x, ball.y - self.y) <= (ball.r + 10)
     def compute_flashlight_polygon(self, walls):
         from math import cos, sin
