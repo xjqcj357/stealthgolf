@@ -439,10 +439,7 @@ class StealthGolf(Widget):
 
         # Decor
         self.decor = []
-        collidable = {"plant", "desk", "chair", "table",
-                      "big_red_button", "blue_screen_monitor",
-                      "big_blue_button", "big_green_button",
-                      "big_yellow_button"}
+        collidable = {"plant", "desk", "chair", "table"}
         for d in f.get("decor", []):
             if isinstance(d, dict):
                 kind = d.get("kind", "")
@@ -760,21 +757,6 @@ class StealthGolf(Widget):
             elif kind == "table":
                 Color(0.4, 0.3, 0.2, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
                 Color(0.3, 0.22, 0.15, alpha); Line(rectangle=(rx, ry, rw, rh), width=1.2)
-            elif kind == "big_red_button":
-                Color(0.4, 0.4, 0.4, alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
-                Color(0.8, 0.0, 0.0, alpha); Ellipse(pos=(rx + rw * 0.1, ry + rh * 0.1), size=(rw * 0.8, rh * 0.8))
-            elif kind == "blue_screen_monitor":
-                Color(0.1, 0.1, 0.1, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
-                Color(0.2, 0.4, 0.9, alpha); Rectangle(pos=(rx + 5, ry + 5), size=(rw - 10, rh - 10))
-            elif kind == "big_blue_button":
-                Color(0.4, 0.4, 0.4, alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
-                Color(0.0, 0.0, 0.8, alpha); Ellipse(pos=(rx + rw * 0.1, ry + rh * 0.1), size=(rw * 0.8, rh * 0.8))
-            elif kind == "big_green_button":
-                Color(0.4, 0.4, 0.4, alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
-                Color(0.0, 0.6, 0.0, alpha); Ellipse(pos=(rx + rw * 0.1, ry + rh * 0.1), size=(rw * 0.8, rh * 0.8))
-            elif kind == "big_yellow_button":
-                Color(0.4, 0.4, 0.4, alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
-                Color(0.8, 0.8, 0.0, alpha); Ellipse(pos=(rx + rw * 0.1, ry + rh * 0.1), size=(rw * 0.8, rh * 0.8))
             else:
                 col = d.get("color", [0.3, 0.3, 0.35, 1])
                 if len(col) == 3:
