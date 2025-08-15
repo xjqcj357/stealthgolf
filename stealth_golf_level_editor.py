@@ -2,7 +2,10 @@
 # Kivy Level Editor (toolbar fix + keyboard shortcuts)
 # - Always-visible toolbar using BoxLayout at the top (no manual positioning).
 # - Keyboard shortcuts for rapid editing.
-# - Same JSON schema as before; compatible with the loader game.
+# - Door placement uses a two-step workflow: first drag out the door, then
+#   drag a touchscreen area. A color picker lets you set the door color.
+# - Same JSON schema as before (now extended with "doors"); compatible with
+#   the loader game.
 #
 from math import cos, sin, atan2, sqrt, radians
 import json, os
@@ -37,6 +40,16 @@ def label_to_floor_index(label):
         return -int(label[1:])
     return 0
 
+COLOR_MAP = {
+    "red":   (0.8,0.0,0.0),
+    "green": (0.0,0.6,0.0),
+    "blue":  (0.0,0.0,0.8),
+    "yellow":(0.8,0.8,0.0),
+    "white": (1.0,1.0,1.0),
+    "black": (0.0,0.0,0.0),
+    "brown": (0.55,0.27,0.07),
+}
+
 class LevelCanvas(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -48,6 +61,7 @@ class LevelCanvas(Widget):
         self.walls = []
         self.decor = []  # [{"kind":..., "rect":[x,y,w,h]}]
         self.agents = [] # [{"a":[x,y], "b":[x,y], "speed":..., "fov_deg":..., "cone_len":...}]
+        self.doors = []  # [{"rect":..., "screen":..., "color":...}]
         self.floors = [self._new_floor()]
         self.current_floor = 0
         self._refresh_floor_refs()
@@ -61,12 +75,14 @@ class LevelCanvas(Widget):
         self.drag_start_world = None
         self.temp_rect = None
         self.temp_agent_a = None
+        self.pending_door_rect = None
+        self.door_color = "red"
         # Status label (bottom-left overlay inside canvas)
         self.status = None
         Clock.schedule_interval(self._tick, 1/60)
 
     def _new_floor(self):
-        return {"walls": [], "decor": [], "agents": [], "stairs": []}
+        return {"walls": [], "decor": [], "agents": [], "stairs": [], "doors": []}
 
     def _refresh_floor_refs(self):
         f = self.floors[self.current_floor]
@@ -74,6 +90,7 @@ class LevelCanvas(Widget):
         self.decor = f["decor"]
         self.agents = f["agents"]
         self.stairs = f["stairs"]
+        self.doors = f.get("doors", [])
 
     # --- IO ---
     def save_json(self, path):
@@ -101,6 +118,8 @@ class LevelCanvas(Widget):
         self.hole_floor = int(data.get("hole_floor", 0))
         if "floors" in data:
             self.floors = data["floors"]
+            for f in self.floors:
+                f.setdefault("doors", [])
         else:
             self.floors = [
                 {
@@ -108,6 +127,7 @@ class LevelCanvas(Widget):
                     "decor": data.get("decor", []),
                     "agents": data.get("agents", []),
                     "stairs": data.get("ramps", []),
+                    "doors": data.get("doors", []),
                 }
             ]
         self.current_floor = self.start_floor
@@ -128,7 +148,7 @@ class LevelCanvas(Widget):
             self.drag_start_world = (touch.x, touch.y, self.cam_x, self.cam_y)
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown"):
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door"):
             self.dragging = True
             self.temp_rect = (wx, wy, 1, 1)
             return True
@@ -160,6 +180,10 @@ class LevelCanvas(Widget):
                 if inside_rect(self.walls[i]): self.walls.pop(i); return True
             for i in reversed(range(len(self.stairs))):
                 if inside_rect(self.stairs[i]["rect"]): self.stairs.pop(i); return True
+            for i in reversed(range(len(self.doors))):
+                d = self.doors[i]
+                if inside_rect(d["rect"]) or inside_rect(d["screen"]):
+                    self.doors.pop(i); return True
             # agents: near segment
             def segdist2(ax,ay,bx,by,px,py):
                 vx,vy = bx-ax, by-ay; wx2,wy2 = px-ax, py-ay
@@ -187,7 +211,7 @@ class LevelCanvas(Widget):
             self.cam_y = max(0, min(self.cam_y, self.world_h - self.height))
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
             x0,y0,_,_ = self.temp_rect
             x1,y1 = wx, wy
             x = min(x0,x1); y = min(y0,y1)
@@ -197,7 +221,7 @@ class LevelCanvas(Widget):
         return False
 
     def on_touch_up(self, touch):
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
             x,y,w,h = self.temp_rect
             if w >= GRID and h >= GRID:
                 if self.tool == "Wall":
@@ -218,6 +242,14 @@ class LevelCanvas(Widget):
                     else:
                         kind = "table"
                     self.decor.append({"kind":kind, "rect":[x,y,w,h]})
+                elif self.tool == "Door":
+                    if self.pending_door_rect is None:
+                        self.pending_door_rect = [x,y,w,h]
+                        self.temp_rect = None; self.dragging = False; return True
+                    else:
+                        door = {"rect": self.pending_door_rect, "screen": [x,y,w,h], "color": self.door_color}
+                        self.doors.append(door)
+                        self.pending_door_rect = None
                 else:
                     direction = "up" if self.tool=="StairUp" else "down"
                     self.stairs.append({"dir":direction, "rect":[x,y,w,h], "target": self.current_floor + (1 if direction=="up" else -1)})
@@ -305,6 +337,18 @@ class LevelCanvas(Widget):
                     Color(0.3,0.22,0.15,1.0)
                     Line(rectangle=(rx,ry,rw,rh), width=1.2)
 
+            # Doors
+            for d in self.doors:
+                rx,ry,rw,rh = d["rect"]
+                sx,sy,sw,sh = d["screen"]
+                r,g,b = COLOR_MAP.get(d.get("color","red"), (0.8,0,0))
+                Color(r,g,b,1.0)
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+                Color(1,1,1,0.2)
+                Rectangle(pos=(sx,sy), size=(sw,sh))
+                Color(1,1,1,0.8)
+                Line(rectangle=(sx,sy,sw,sh), width=1.1)
+
             # Stairs
             for r in self.stairs:
                 rx,ry,rw,rh = r["rect"]
@@ -385,6 +429,12 @@ class LevelCanvas(Widget):
                 Color(0.9, 0.9, 1.0, 0.8)
                 Line(rectangle=(rx,ry,rw,rh), width=1.1)
 
+            if self.pending_door_rect is not None:
+                r,g,b = COLOR_MAP.get(self.door_color,(0.8,0,0))
+                Color(r,g,b,0.5)
+                rx,ry,rw,rh = self.pending_door_rect
+                Rectangle(pos=(rx,ry), size=(rw,rh))
+
             PopMatrix()
 
             # Toolbar background strip drawn as overlay (for contrast behind buttons)
@@ -422,7 +472,7 @@ class LevelEditorRoot(FloatLayout):
 
     def _build_toolbar(self):
         self.toolbar.spacing = 4
-        tools = ["Pan","Wall","Agent","Start","Hole","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Erase"]
+        tools = ["Pan","Wall","Door","Agent","Start","Hole","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Erase"]
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
 
@@ -433,6 +483,10 @@ class LevelEditorRoot(FloatLayout):
         self.toolbar.add_widget(self.load_spinner)
 
         self.toolbar.add_widget(self._tool_button("Clear"))
+
+        self.door_color_spinner = Spinner(text="red", values=("red","green","blue","yellow","white","black","brown"), size_hint=(None,1), width=100)
+        self.door_color_spinner.bind(text=self._on_color_select)
+        self.toolbar.add_widget(self.door_color_spinner)
 
         self.floor_spinner = Spinner(text="F1", values=(), size_hint=(None,1), width=100)
         self.floor_spinner.bind(text=self._on_floor_select)
@@ -472,6 +526,7 @@ class LevelEditorRoot(FloatLayout):
         # cancel in-progress operations
         self.canvas_view.temp_rect = None
         self.canvas_view.temp_agent_a = None
+        self.canvas_view.pending_door_rect = None
         self.canvas_view.dragging = False
 
     # Keyboard shortcuts
@@ -518,6 +573,9 @@ class LevelEditorRoot(FloatLayout):
         if ok:
             self.current_file = text
         self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {text}"
+
+    def _on_color_select(self, spinner, text):
+        self.canvas_view.door_color = text
         self._update_floor_spinner()
 
     def _update_floor_spinner(self):
