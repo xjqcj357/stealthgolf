@@ -1,31 +1,17 @@
-"""
-Common geometry utilities for Stealth Golf.
-"""
 
-from __future__ import annotations
+# Minimal geometry helpers auto-installed by Stealth Golf
 
-from typing import Iterable, Tuple, Optional
-
-
-def clamp(v: float, lo: float, hi: float) -> float:
-    """Clamp *v* to the inclusive range [lo, hi]."""
+def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
 
-
-def length(vx: float, vy: float) -> float:
-    """Return the Euclidean length of a 2-D vector."""
+def length(vx, vy):
     return (vx * vx + vy * vy) ** 0.5
 
-
-def normalize(vx: float, vy: float) -> Tuple[float, float]:
-    """Return the unit vector of (vx, vy) or (0, 0) if zero length."""
+def normalize(vx, vy):
     l = length(vx, vy)
     return (0.0, 0.0) if l == 0 else (vx / l, vy / l)
 
-
-def seg_intersect(p1: Tuple[float, float], p2: Tuple[float, float],
-                  p3: Tuple[float, float], p4: Tuple[float, float]) -> Tuple[bool, float, float, float, float]:
-    """Return intersection data for segment p1-p2 with segment p3-p4."""
+def seg_intersect(p1, p2, p3, p4):
     x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
     den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
     if abs(den) < 1e-9:
@@ -37,10 +23,7 @@ def seg_intersect(p1: Tuple[float, float], p2: Tuple[float, float],
         return (True, t, u, ix, iy)
     return (False, 0, 0, 0, 0)
 
-
-def ray_rect_nearest_hit(ox: float, oy: float, dirx: float, diry: float,
-                         rect: Tuple[float, float, float, float]) -> Optional[Tuple[float, float]]:
-    """Return nearest hit point of a ray and axis-aligned rectangle or ``None``."""
+def ray_rect_nearest_hit(ox, oy, dirx, diry, rect):
     rx, ry, rw, rh = rect
     farx = ox + dirx * 99999
     fary = oy + diry * 99999
@@ -59,10 +42,7 @@ def ray_rect_nearest_hit(ox: float, oy: float, dirx: float, diry: float,
             best_pt = (ix, iy)
     return best_pt
 
-
-def los_blocked(ox: float, oy: float, tx: float, ty: float,
-                walls: Iterable[Tuple[float, float, float, float]]) -> bool:
-    """Return ``True`` if line of sight from (ox, oy) to (tx, ty) is blocked."""
+def los_blocked(ox, oy, tx, ty, walls):
     for rx, ry, rw, rh in walls:
         edges = [
             ((rx, ry), (rx + rw, ry)),

@@ -12,10 +12,9 @@ from kivy.graphics import Color, Ellipse, Rectangle, Line, Triangle, PushMatrix,
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 # Ensure ``common.geometry`` is available.  If the package is missing, a
-# minimal copy of the helpers is installed into ``sys.modules`` at runtime.
-# Import-time file generation confused tools like PyInstaller (which repeatedly
-# rescanned the changing filesystem), so the fallback now lives purely in
-# memory.
+# minimal copy of the helpers is written to ``common/geometry.py`` and then
+# imported.  This allows the game to start even when the supporting package
+# wasn't shipped alongside the script.
 def _ensure_geometry():
     try:
         from common.geometry import (
@@ -28,53 +27,40 @@ def _ensure_geometry():
         )
         return clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked
     except ModuleNotFoundError:
-        import sys, types
+        import importlib.util, os, textwrap
 
-        module = types.ModuleType("common.geometry")
+        geom_src = textwrap.dedent(
+            '''
+            # Minimal geometry helpers auto-installed by Stealth Golf
 
-        def clamp(v, lo, hi):
-            return lo if v < lo else hi if v > hi else v
+            def clamp(v, lo, hi):
+                return lo if v < lo else hi if v > hi else v
 
-        def length(vx, vy):
-            return (vx * vx + vy * vy) ** 0.5
+            def length(vx, vy):
+                return (vx * vx + vy * vy) ** 0.5
 
-        def normalize(vx, vy):
-            l = length(vx, vy)
-            return (0.0, 0.0) if l == 0 else (vx / l, vy / l)
+            def normalize(vx, vy):
+                l = length(vx, vy)
+                return (0.0, 0.0) if l == 0 else (vx / l, vy / l)
 
-        def seg_intersect(p1, p2, p3, p4):
-            x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
-            den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-            if abs(den) < 1e-9:
+            def seg_intersect(p1, p2, p3, p4):
+                x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
+                den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+                if abs(den) < 1e-9:
+                    return (False, 0, 0, 0, 0)
+                t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
+                u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den
+                if 0 <= t <= 1 and 0 <= u <= 1:
+                    ix = x1 + t * (x2 - x1); iy = y1 + t * (y2 - y1)
+                    return (True, t, u, ix, iy)
                 return (False, 0, 0, 0, 0)
-            t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
-            u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den
-            if 0 <= t <= 1 and 0 <= u <= 1:
-                ix = x1 + t * (x2 - x1); iy = y1 + t * (y2 - y1)
-                return (True, t, u, ix, iy)
-            return (False, 0, 0, 0, 0)
 
-        def ray_rect_nearest_hit(ox, oy, dirx, diry, rect):
-            rx, ry, rw, rh = rect
-            farx = ox + dirx * 99999
-            fary = oy + diry * 99999
-            best_t = None
-            best_pt = None
-            edges = [
-                ((rx, ry), (rx + rw, ry)),
-                ((rx + rw, ry), (rx + rw, ry + rh)),
-                ((rx + rw, ry + rh), (rx, ry + rh)),
-                ((rx, ry + rh), (rx, ry)),
-            ]
-            for a, b in edges:
-                hit, t, u, ix, iy = seg_intersect((ox, oy), (farx, fary), a, b)
-                if hit and (best_t is None or t < best_t):
-                    best_t = t
-                    best_pt = (ix, iy)
-            return best_pt
-
-        def los_blocked(ox, oy, tx, ty, walls):
-            for rx, ry, rw, rh in walls:
+            def ray_rect_nearest_hit(ox, oy, dirx, diry, rect):
+                rx, ry, rw, rh = rect
+                farx = ox + dirx * 99999
+                fary = oy + diry * 99999
+                best_t = None
+                best_pt = None
                 edges = [
                     ((rx, ry), (rx + rw, ry)),
                     ((rx + rw, ry), (rx + rw, ry + rh)),
@@ -82,23 +68,47 @@ def _ensure_geometry():
                     ((rx, ry + rh), (rx, ry)),
                 ]
                 for a, b in edges:
-                    hit, t, u, ix, iy = seg_intersect((ox, oy), (tx, ty), a, b)
-                    if hit and 0 < t < 1 - 1e-6:
-                        return True
-            return False
+                    hit, t, u, ix, iy = seg_intersect((ox, oy), (farx, fary), a, b)
+                    if hit and (best_t is None or t < best_t):
+                        best_t = t
+                        best_pt = (ix, iy)
+                return best_pt
 
-        module.clamp = clamp
-        module.length = length
-        module.normalize = normalize
-        module.seg_intersect = seg_intersect
-        module.ray_rect_nearest_hit = ray_rect_nearest_hit
-        module.los_blocked = los_blocked
+            def los_blocked(ox, oy, tx, ty, walls):
+                for rx, ry, rw, rh in walls:
+                    edges = [
+                        ((rx, ry), (rx + rw, ry)),
+                        ((rx + rw, ry), (rx + rw, ry + rh)),
+                        ((rx + rw, ry + rh), (rx, ry + rh)),
+                        ((rx, ry + rh), (rx, ry)),
+                    ]
+                    for a, b in edges:
+                        hit, t, u, ix, iy = seg_intersect((ox, oy), (tx, ty), a, b)
+                        if hit and 0 < t < 1 - 1e-6:
+                            return True
+                return False
+            '''
+        )
 
-        pkg = sys.modules.setdefault("common", types.ModuleType("common"))
-        pkg.geometry = module
-        sys.modules["common.geometry"] = module
+        os.makedirs("common", exist_ok=True)
+        init_path = os.path.join("common", "__init__.py")
+        if not os.path.exists(init_path):
+            open(init_path, "w").close()
+        geom_path = os.path.join("common", "geometry.py")
+        with open(geom_path, "w", encoding="utf-8") as f:
+            f.write(geom_src)
 
-        return clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked
+        spec = importlib.util.spec_from_file_location("common.geometry", geom_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return (
+            module.clamp,
+            module.length,
+            module.normalize,
+            module.seg_intersect,
+            module.ray_rect_nearest_hit,
+            module.los_blocked,
+        )
 
 clamp, length, normalize, seg_intersect, ray_rect_nearest_hit, los_blocked = _ensure_geometry()
 
@@ -357,25 +367,7 @@ class StealthGolf(Widget):
         if path.endswith(".json"):
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        elif path.endswith(".py"):
-            # If a .py was provided, either launch it as a standalone app, or try extracting LEVEL_DATA/get_level()
-            try:
-                mod_globals = runpy.run_path(path)
-                if "LEVEL_DATA" in mod_globals and isinstance(mod_globals["LEVEL_DATA"], dict):
-                    return mod_globals["LEVEL_DATA"]
-                if "get_level" in mod_globals and callable(mod_globals["get_level"]):
-                    return mod_globals["get_level"]()
-            except Exception as e:
-                print("Failed to import level from %s: %r" % (path, e))
-            # As a last resort, replace the process with that .py (handoff)
-            try:
-                os.execl(sys.executable, sys.executable, path)
-            except Exception as e:
-                print("exec handoff failed: %r" % e)
-                # fallback to built-in
-                return self._fallback_level()
-        else:
-            # Unknown extension
+                    # Unknown extension
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
 
