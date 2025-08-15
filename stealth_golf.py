@@ -340,10 +340,13 @@ class StealthGolf(Widget):
 
         self._apply_level_data(data)
 
-        # Previous floor visuals and cross-fade progress
-        self.prev_walls = []
-        self.prev_decor = []
-        self.prev_agents = []
+        # Stair transition visuals and cross-fade progress
+        self.stair_transition = None
+        self.next_walls = []
+        self.next_decor = []
+        self.next_agents = []
+        self.next_colliders = []
+        self.orig_colliders = []
         self.floor_fade_t = 1.0
 
         # Input/aim
@@ -626,27 +629,105 @@ class StealthGolf(Widget):
                         rx, ry, rw, rh = s["rect"]
                         if rx <= self.ball.x <= rx + rw and ry <= self.ball.y <= ry + rh:
                             currently_on_stairs = True
-                            if not self.on_stairs and self.transition_cooldown <= 0:
+                            if not self.stair_transition and self.transition_cooldown <= 0:
                                 target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
                                 if 0 <= target < len(self.floors):
-                                    self.prev_walls = list(self.walls_drawn)
-                                    self.prev_decor = list(self.decor)
-                                    self.prev_agents = list(self.agents)
-                                    self.floor_fade_t = 0.0
-                                    self.current_floor = target
-                                    self._apply_floor(self.current_floor)
+                                    self.stair_transition = {
+                                        "rect": s["rect"],
+                                        "dir": s["dir"],
+                                        "origin": self.current_floor,
+                                        "target": target,
+                                    }
+                                    tf = self.floors[target]
+                                    self.next_walls = [tuple(r) for r in tf.get("walls", [])]
+                                    self.next_colliders = list(self.next_walls)
+                                    for r in tf.get("colliders", []):
+                                        self.next_colliders.append(tuple(r))
+                                    self.next_decor = []
+                                    collidable = {"plant", "desk", "chair", "table"}
+                                    for d in tf.get("decor", []):
+                                        if isinstance(d, dict):
+                                            kind = d.get("kind", "")
+                                            rect = d.get("rect", [0, 0, 0, 0])
+                                            color = d.get("color")
+                                            shape = d.get("shape")
+                                        elif isinstance(d, (list, tuple)) and len(d) >= 2:
+                                            kind, rect = d[0], d[1]
+                                            color = d[2] if len(d) > 2 else None
+                                            shape = d[3] if len(d) > 3 else None
+                                        else:
+                                            continue
+                                        item = {"kind": kind, "rect": list(rect)}
+                                        if color is not None:
+                                            item["color"] = color
+                                        if shape is not None:
+                                            item["shape"] = shape
+                                        self.next_decor.append(item)
+                                        if kind in collidable:
+                                            self.next_colliders.append(tuple(rect))
+                                    self.next_agents = [
+                                        Agent(
+                                            a["a"][0],
+                                            a["a"][1],
+                                            a["b"][0],
+                                            a["b"][1],
+                                            speed=a.get("speed", 80),
+                                            fov_deg=a.get("fov_deg", 60),
+                                            cone_len=a.get("cone_len", 260),
+                                        )
+                                        for a in tf.get("agents", [])
+                                    ]
+                                    self.orig_colliders = self.colliders
                                     self.transition_cooldown = 0.4
-                                    self.on_stairs = True
                             break
-                    if not currently_on_stairs:
+                    if self.stair_transition:
+                        sx, sy, sw, sh = self.stair_transition["rect"]
+                        if sw > sh:
+                            u = (self.ball.x - sx) / sw
+                        else:
+                            u = (self.ball.y - sy) / sh
+                        if self.stair_transition["dir"] in ("right", "up"):
+                            self.floor_fade_t = clamp(u, 0.0, 1.0)
+                        else:
+                            self.floor_fade_t = clamp(1 - u, 0.0, 1.0)
+                        if self.floor_fade_t >= 0.5:
+                            self.colliders = self.next_colliders
+                        else:
+                            self.colliders = self.orig_colliders
+                        inside = sx <= self.ball.x <= sx + sw and sy <= self.ball.y <= sy + sh
+                        if not inside:
+                            if self.floor_fade_t < 1.0:
+                                self.next_walls = []
+                                self.next_decor = []
+                                self.next_agents = []
+                                self.next_colliders = []
+                                self.colliders = self.orig_colliders
+                                self.orig_colliders = []
+                                self.floor_fade_t = 1.0
+                                self.stair_transition = None
+                            else:
+                                dir = self.stair_transition["dir"]
+                                far = (
+                                    (dir == "right" and self.ball.x > sx + sw)
+                                    or (dir == "left" and self.ball.x < sx)
+                                    or (dir == "up" and self.ball.y > sy + sh)
+                                    or (dir == "down" and self.ball.y < sy)
+                                )
+                                if far:
+                                    self.current_floor = self.stair_transition["target"]
+                                    self.walls_drawn = self.next_walls; self.decor = self.next_decor; self.agents = self.next_agents
+                                    self.colliders = self.next_colliders
+                                    self._apply_floor(self.current_floor)
+                                    self.next_walls = []
+                                    self.next_decor = []
+                                    self.next_agents = []
+                                    self.next_colliders = []
+                                    self.orig_colliders = []
+                                    self.stair_transition = None
+                    if not currently_on_stairs and not self.stair_transition:
                         self.on_stairs = False
-        # Advance floor cross-fade
-        if self.floor_fade_t < 1.0:
-            self.floor_fade_t = min(1.0, self.floor_fade_t + dt * 2.5)
-            if self.floor_fade_t >= 1.0:
-                self.prev_walls = []
-                self.prev_decor = []
-                self.prev_agents = []
+                    else:
+                        self.on_stairs = True
         self._update_camera(); self.draw()
 
     # ------------- Camera -------------
@@ -728,17 +809,22 @@ class StealthGolf(Widget):
             for x in range(0, self.world_w, grid): Rectangle(pos=(x,0), size=(2, self.world_h))
             for y in range(0, self.world_h, grid): Rectangle(pos=(0,y), size=(self.world_w,2))
             # Walls
-            if self.prev_walls:
+            if self.next_walls:
                 Color(0.25,0.28,0.33,1.0 - self.floor_fade_t)
-                for rx,ry,rw,rh in self.prev_walls:
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
-            Color(0.25,0.28,0.33,self.floor_fade_t)
+            else:
+                Color(0.25,0.28,0.33,1.0)
             for rx,ry,rw,rh in self.walls_drawn:
                 Rectangle(pos=(rx,ry), size=(rw,rh))
+            if self.next_walls:
+                Color(0.25,0.28,0.33,self.floor_fade_t)
+                for rx,ry,rw,rh in self.next_walls:
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
             # Decor
-            if self.prev_decor:
-                self._draw_decor(self.prev_decor, 1.0 - self.floor_fade_t)
-            self._draw_decor(self.decor, self.floor_fade_t)
+            if self.next_decor:
+                self._draw_decor(self.decor, 1.0 - self.floor_fade_t)
+                self._draw_decor(self.next_decor, self.floor_fade_t)
+            else:
+                self._draw_decor(self.decor, 1.0)
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]
@@ -753,11 +839,17 @@ class StealthGolf(Widget):
                     y = ry + (i/steps)*rh
                     Line(points=[rx, y, rx+rw, y], width=1)
             # Lights (occluded)
-            self._draw_agent_lights(self.prev_agents, 1.0 - self.floor_fade_t)
-            self._draw_agent_lights(self.agents, self.floor_fade_t)
+            if self.next_agents:
+                self._draw_agent_lights(self.agents, 1.0 - self.floor_fade_t)
+                self._draw_agent_lights(self.next_agents, self.floor_fade_t)
+            else:
+                self._draw_agent_lights(self.agents, 1.0)
             # Agents
-            self._draw_agent_bodies(self.prev_agents, 1.0 - self.floor_fade_t)
-            self._draw_agent_bodies(self.agents, self.floor_fade_t)
+            if self.next_agents:
+                self._draw_agent_bodies(self.agents, 1.0 - self.floor_fade_t)
+                self._draw_agent_bodies(self.next_agents, self.floor_fade_t)
+            else:
+                self._draw_agent_bodies(self.agents, 1.0)
             # Hole
             if self.current_floor == self.hole_floor:
                 cx,cy,hr=self.hole
