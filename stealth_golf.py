@@ -127,6 +127,18 @@ LOW_SPEED_THRESHOLD = 140.0  # px/s
 LOW_SPEED_DAMP_BASE = 0.78   # stronger damping baseline when very slow (per 60 FPS frame)
 LOW_SPEED_DAMP_NEAR = 0.92   # gentler damping near threshold (per 60 FPS frame)
 
+# Door hacking
+HACK_DURATION = 2.0  # seconds required to open a door
+DOOR_COLORS = {
+    "red": (0.8, 0.1, 0.1),
+    "green": (0.1, 0.7, 0.1),
+    "blue": (0.1, 0.3, 0.8),
+    "yellow": (0.9, 0.9, 0.1),
+    "white": (0.9, 0.9, 0.9),
+    "black": (0.1, 0.1, 0.1),
+    "brown": (0.45, 0.33, 0.2),
+}
+
 # -------------------------------- Utilities ----------------------------------
 
 def _search_paths(names):
@@ -391,8 +403,12 @@ class StealthGolf(Widget):
                     "decor": data.get("decor", []),
                     "agents": data.get("agents", []),
                     "stairs": data.get("ramps", []),
+                    "doors": [],
                 }
             ]
+
+        for f in self.floors:
+            f.setdefault("doors", [])
 
         self.current_floor = max(0, min(self.start_floor, len(self.floors) - 1))
         self._apply_floor(self.current_floor)
@@ -405,8 +421,11 @@ class StealthGolf(Widget):
         self.cam_y = 0
         self._update_camera()
 
-        # Stair state
+        # Stair and door state
         self.on_stairs = False
+        self.hacking_door = None
+        self.hack_timer = 0.0
+        self.hacking_touch_id = None
 
     def _apply_floor(self, idx):
         f = self.floors[idx]
@@ -462,6 +481,30 @@ class StealthGolf(Widget):
             for a in f.get("agents", [])
         ]
 
+        # Doors
+        self.doors = []
+        for d in f.get("doors", []):
+            rect = tuple(d.get("rect", [0, 0, 0, 0]))
+            screen = tuple(d.get("screen", rect))
+            color = d.get("color", "red")
+            open_state = bool(d.get("open", False))
+            door_entry = {
+                "rect": rect,
+                "screen": screen,
+                "color": color,
+                "open": open_state,
+                "initial_open": open_state,
+                "_src": d,
+            }
+            self.doors.append(door_entry)
+            if not open_state:
+                self.colliders.append(rect)
+
+        # Reset hacking state when switching floors
+        self.hacking_door = None
+        self.hack_timer = 0.0
+        self.hacking_touch_id = None
+
     def _fallback_level(self):
         return {
             "world": {"w": 1400, "h": 2200},
@@ -479,6 +522,7 @@ class StealthGolf(Widget):
                     ],
                     "decor": [],
                     "stairs": [],
+                    "doors": [],
                     "agents": [{"a": [300, 600], "b": [1000, 600], "speed": 90}],
                 }
             ],
@@ -539,6 +583,18 @@ class StealthGolf(Widget):
         if touch.x > self.width - 140 and touch.y > self.height - 80:
             self.mode_idx = (self.mode_idx + 1) % len(self.modes); return True
         wx, wy = self.screen_to_world(touch.x, touch.y)
+        # Door hacking
+        for d in self.doors:
+            if d.get("open"):
+                continue
+            sx, sy, sw, sh = d.get("screen", d.get("rect", [0,0,0,0]))
+            ball_near = sx <= self.ball.x <= sx + sw and sy <= self.ball.y <= sy + sh
+            touch_near = sx <= wx <= sx + sw and sy <= wy <= sy + sh
+            if ball_near and touch_near:
+                self.hacking_door = d
+                self.hack_timer = HACK_DURATION
+                self.hacking_touch_id = touch.uid
+                return True
         if length(wx - self.ball.x, wy - self.ball.y) <= self.ball.r + 36 and not self.ball.in_motion:
             self.aiming=True; self.aim_touch_id=touch.uid; self.aim_start=(wx,wy); self.aim_current=(wx,wy); return True
         return False
@@ -549,6 +605,11 @@ class StealthGolf(Widget):
         return False
 
     def on_touch_up(self, touch):
+        if self.hacking_door and touch.uid == self.hacking_touch_id:
+            self.hacking_door = None
+            self.hack_timer = 0.0
+            self.hacking_touch_id = None
+            return True
         if self.aiming and touch.uid == self.aim_touch_id:
             sx, sy = self.aim_start; cx, cy = self.aim_current
             ix, iy = (sx - cx), (sy - cy)
@@ -588,6 +649,24 @@ class StealthGolf(Widget):
                 if self.transition_cooldown > 0:
                     self.transition_cooldown = max(0.0, self.transition_cooldown - dt)
                 self.ball.update(dt, self.colliders)
+                # Door hacking progress
+                if self.hacking_door:
+                    sx, sy, sw, sh = self.hacking_door["screen"]
+                    if not (sx <= self.ball.x <= sx + sw and sy <= self.ball.y <= sy + sh):
+                        self.hacking_door = None
+                        self.hack_timer = 0.0
+                        self.hacking_touch_id = None
+                    else:
+                        self.hack_timer = max(0.0, self.hack_timer - dt)
+                        if self.hack_timer <= 0.0:
+                            self.hacking_door["open"] = True
+                            if "_src" in self.hacking_door:
+                                self.hacking_door["_src"]["open"] = True
+                            rect = self.hacking_door["rect"]
+                            if rect in self.colliders:
+                                self.colliders.remove(rect)
+                            self.hacking_door = None
+                            self.hacking_touch_id = None
                 for a in self.agents:
                     caught = a.update(dt, self.ball, self.colliders)
                     if caught and not self.win:
@@ -730,6 +809,21 @@ class StealthGolf(Widget):
             if self.prev_decor:
                 self._draw_decor(self.prev_decor, 1.0 - self.floor_fade_t)
             self._draw_decor(self.decor, self.floor_fade_t)
+            # Doors
+            for d in self.doors:
+                if d.get("open"):
+                    continue
+                rx, ry, rw, rh = d["rect"]
+                col = DOOR_COLORS.get(d.get("color", "red"), (0.7, 0.1, 0.1))
+                Color(col[0], col[1], col[2], self.floor_fade_t)
+                Rectangle(pos=(rx, ry), size=(rw, rh))
+            if self.hacking_door and self.hack_timer > 0:
+                sx, sy, sw, sh = self.hacking_door["screen"]
+                pct = 1.0 - (self.hack_timer / HACK_DURATION)
+                Color(0.2, 0.8, 0.2, 1)
+                Rectangle(pos=(sx, sy + sh + 4), size=(sw * pct, 4))
+                Color(1, 1, 1, 1)
+                Line(rectangle=(sx, sy + sh + 4, sw, 4), width=1)
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]
@@ -803,6 +897,20 @@ class StealthGolf(Widget):
         self.ball.smoke_timer = 0.0
         self.caught = False; self.win=False; self.drop_timer=0.0; self.message_timer=0.0
         self.on_stairs = False
+        self.hacking_door = None
+        self.hack_timer = 0.0
+        self.hacking_touch_id = None
+        for d in self.doors:
+            d["open"] = d.get("initial_open", False)
+            if "_src" in d:
+                d["_src"]["open"] = d["open"]
+            rect = d["rect"]
+            if d["open"]:
+                if rect in self.colliders:
+                    self.colliders.remove(rect)
+            else:
+                if rect not in self.colliders:
+                    self.colliders.append(rect)
         for a in self.agents:
             a.x,a.y = a.ax,a.ay; a.dir=1; a.chasing=False; a.look_dirx, a.look_diry = normalize(a.bx-a.ax, a.by-a.ay)
 
