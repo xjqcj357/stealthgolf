@@ -439,6 +439,7 @@ class StealthGolf(Widget):
 
         # Decor
         self.decor = []
+        # Items that should block the ball; buttons are decorative only
         collidable = {"plant", "desk", "chair", "table"}
         for d in f.get("decor", []):
             if isinstance(d, dict):
@@ -757,6 +758,15 @@ class StealthGolf(Widget):
             elif kind == "table":
                 Color(0.4, 0.3, 0.2, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
                 Color(0.3, 0.22, 0.15, alpha); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+            elif kind == "button":
+                Color(0.85, 0.85, 0.85, alpha)
+                Rectangle(pos=(rx, ry), size=(rw, rh))
+                col = d.get("color", [1.0, 0.0, 0.0])
+                Color(col[0], col[1], col[2], alpha)
+                Ellipse(
+                    pos=(rx + rw * 0.25, ry + rh * 0.25),
+                    size=(rw * 0.5, rh * 0.5),
+                )
             else:
                 col = d.get("color", [0.3, 0.3, 0.35, 1])
                 if len(col) == 3:
