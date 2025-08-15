@@ -77,6 +77,7 @@ class LevelCanvas(Widget):
         self.temp_agent_a = None
         self.pending_door_rect = None
         self.door_color = "red"
+        self.button_color = "red"
         # Status label (bottom-left overlay inside canvas)
         self.status = None
         Clock.schedule_interval(self._tick, 1/60)
@@ -148,7 +149,7 @@ class LevelCanvas(Widget):
             self.drag_start_world = (touch.x, touch.y, self.cam_x, self.cam_y)
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door"):
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button","StairUp","StairDown","Door"):
             self.dragging = True
             self.temp_rect = (wx, wy, 1, 1)
             return True
@@ -211,7 +212,7 @@ class LevelCanvas(Widget):
             self.cam_y = max(0, min(self.cam_y, self.world_h - self.height))
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
             x0,y0,_,_ = self.temp_rect
             x1,y1 = wx, wy
             x = min(x0,x1); y = min(y0,y1)
@@ -221,12 +222,12 @@ class LevelCanvas(Widget):
         return False
 
     def on_touch_up(self, touch):
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
             x,y,w,h = self.temp_rect
             if w >= GRID and h >= GRID:
                 if self.tool == "Wall":
                     self.walls.append((x,y,w,h))
-                elif self.tool in ("Elevator","Rug","Vent","Plant","Desk","Chair","Table"):
+                elif self.tool in ("Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button"):
                     if self.tool == "Elevator":
                         kind = "elevator"
                     elif self.tool == "Rug":
@@ -239,9 +240,13 @@ class LevelCanvas(Widget):
                         kind = "desk"
                     elif self.tool == "Chair":
                         kind = "chair"
+                    elif self.tool == "Button":
+                        self.decor.append({"kind":"button", "rect":[x,y,w,h], "color": self.button_color})
+                        kind = None
                     else:
                         kind = "table"
-                    self.decor.append({"kind":kind, "rect":[x,y,w,h]})
+                    if kind is not None:
+                        self.decor.append({"kind":kind, "rect":[x,y,w,h]})
                 elif self.tool == "Door":
                     if self.pending_door_rect is None:
                         self.pending_door_rect = [x,y,w,h]
@@ -336,6 +341,12 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.3,0.22,0.15,1.0)
                     Line(rectangle=(rx,ry,rw,rh), width=1.2)
+                elif kind == "button":
+                    Color(0.75,0.75,0.75,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    r,g,b = COLOR_MAP.get(d.get("color","red"), (0.8,0,0))
+                    Color(r,g,b,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
 
             # Doors
             for d in self.doors:
@@ -472,9 +483,17 @@ class LevelEditorRoot(FloatLayout):
 
     def _build_toolbar(self):
         self.toolbar.spacing = 4
-        tools = ["Pan","Wall","Door","Agent","Start","Hole","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Erase"]
+        tools = ["Pan","Wall","Door","Agent","Start","Hole","StairUp","StairDown","Erase"]
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
+
+        self.scenery_spinner = Spinner(text="Scenery", values=("Elevator","Rug","Vent","Plant","Desk","Chair","Table"), size_hint=(None,1), width=120)
+        self.scenery_spinner.bind(text=self._on_scenery_select)
+        self.toolbar.add_widget(self.scenery_spinner)
+
+        self.button_spinner = Spinner(text="Button", values=("red","green","blue","yellow","white","black","brown"), size_hint=(None,1), width=100)
+        self.button_spinner.bind(text=self._on_button_select)
+        self.toolbar.add_widget(self.button_spinner)
 
         self.toolbar.add_widget(self._tool_button("Save"))
 
@@ -573,6 +592,19 @@ class LevelEditorRoot(FloatLayout):
         if ok:
             self.current_file = text
         self.canvas_view.status.text = f"{'Loaded' if ok else 'No file found'}: {text}"
+
+    def _on_scenery_select(self, spinner, text):
+        if text == "Scenery":
+            return
+        self._select_tool(text)
+        spinner.text = "Scenery"
+
+    def _on_button_select(self, spinner, text):
+        if text == "Button":
+            return
+        self.canvas_view.button_color = text
+        self._select_tool("Button")
+        spinner.text = "Button"
 
     def _on_color_select(self, spinner, text):
         self.canvas_view.door_color = text
