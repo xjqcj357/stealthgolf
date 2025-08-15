@@ -1,0 +1,18 @@
+{
+  "world": {"w": 1400, "h": 2200},
+  "start": [240,220],
+  "start_floor": 0,
+  "hole": {"cx":1240, "cy":2020, "r":22},
+  "hole_floor": 0,
+  "floors": [
+    {
+      "walls": [],
+      "decor": [],
+      "agents": [],
+      "stairs": [],
+      "doors": [
+        {"rect": [100,100,80,20], "screen": [200,200,60,40], "color": "red"}
+      ]
+    }
+  ]
+}
