@@ -50,6 +50,23 @@ COLOR_MAP = {
     "brown": (0.55,0.27,0.07),
 }
 
+# Scenery tool names and mapping to stored "kind" strings
+SCENERY_KIND_MAP = {
+    "Elevator": "elevator",
+    "Rug": "rug",
+    "Vent": "vent",
+    "Plant": "plant",
+    "Desk": "desk",
+    "Chair": "chair",
+    "Table": "table",
+    "BigRedButton": "big_red_button",
+    "BlueScreen": "blue_screen_monitor",
+    "BigBlueButton": "big_blue_button",
+    "BigGreenButton": "big_green_button",
+    "BigYellowButton": "big_yellow_button",
+}
+SCENERY_TOOLS = tuple(SCENERY_KIND_MAP.keys())
+
 class LevelCanvas(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -77,7 +94,6 @@ class LevelCanvas(Widget):
         self.temp_agent_a = None
         self.pending_door_rect = None
         self.door_color = "red"
-        self.button_color = "red"
         # Status label (bottom-left overlay inside canvas)
         self.status = None
         Clock.schedule_interval(self._tick, 1/60)
@@ -149,7 +165,7 @@ class LevelCanvas(Widget):
             self.drag_start_world = (touch.x, touch.y, self.cam_x, self.cam_y)
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button","StairUp","StairDown","Door"):
+        if self.tool in ("Wall","StairUp","StairDown","Door") + SCENERY_TOOLS:
             self.dragging = True
             self.temp_rect = (wx, wy, 1, 1)
             return True
@@ -212,7 +228,7 @@ class LevelCanvas(Widget):
             self.cam_y = max(0, min(self.cam_y, self.world_h - self.height))
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
             x0,y0,_,_ = self.temp_rect
             x1,y1 = wx, wy
             x = min(x0,x1); y = min(y0,y1)
@@ -222,31 +238,14 @@ class LevelCanvas(Widget):
         return False
 
     def on_touch_up(self, touch):
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall","StairUp","StairDown","Door") + SCENERY_TOOLS and self.dragging and self.temp_rect:
             x,y,w,h = self.temp_rect
             if w >= GRID and h >= GRID:
                 if self.tool == "Wall":
                     self.walls.append((x,y,w,h))
-                elif self.tool in ("Elevator","Rug","Vent","Plant","Desk","Chair","Table","Button"):
-                    if self.tool == "Elevator":
-                        kind = "elevator"
-                    elif self.tool == "Rug":
-                        kind = "rug"
-                    elif self.tool == "Vent":
-                        kind = "vent"
-                    elif self.tool == "Plant":
-                        kind = "plant"
-                    elif self.tool == "Desk":
-                        kind = "desk"
-                    elif self.tool == "Chair":
-                        kind = "chair"
-                    elif self.tool == "Button":
-                        self.decor.append({"kind":"button", "rect":[x,y,w,h], "color": self.button_color})
-                        kind = None
-                    else:
-                        kind = "table"
-                    if kind is not None:
-                        self.decor.append({"kind":kind, "rect":[x,y,w,h]})
+                elif self.tool in SCENERY_TOOLS:
+                    kind = SCENERY_KIND_MAP.get(self.tool, self.tool.lower())
+                    self.decor.append({"kind":kind, "rect":[x,y,w,h]})
                 elif self.tool == "Door":
                     if self.pending_door_rect is None:
                         self.pending_door_rect = [x,y,w,h]
@@ -341,12 +340,31 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.3,0.22,0.15,1.0)
                     Line(rectangle=(rx,ry,rw,rh), width=1.2)
-                elif kind == "button":
-                    Color(0.75,0.75,0.75,1.0)
-                    Rectangle(pos=(rx,ry), size=(rw,rh))
-                    r,g,b = COLOR_MAP.get(d.get("color","red"), (0.8,0,0))
-                    Color(r,g,b,1.0)
+                elif kind == "big_red_button":
+                    Color(0.4,0.4,0.4,1.0)
                     Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.8,0.0,0.0,1.0)
+                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
+                elif kind == "blue_screen_monitor":
+                    Color(0.1,0.1,0.1,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.2,0.4,0.9,1.0)
+                    Rectangle(pos=(rx+5, ry+5), size=(rw-10, rh-10))
+                elif kind == "big_blue_button":
+                    Color(0.4,0.4,0.4,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.0,0.0,0.8,1.0)
+                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
+                elif kind == "big_green_button":
+                    Color(0.4,0.4,0.4,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.0,0.6,0.0,1.0)
+                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
+                elif kind == "big_yellow_button":
+                    Color(0.4,0.4,0.4,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.8,0.8,0.0,1.0)
+                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
 
             # Doors
             for d in self.doors:
@@ -456,7 +474,7 @@ class LevelCanvas(Widget):
         if not self.status:
             self.status = Label(text="", font_size=14, color=(1,1,1,1), size_hint=(None,None), pos=(10, 8))
             self.add_widget(self.status)
-        self.status.text = f"Floor {floor_label(self.current_floor)}  •  Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..0=Tools, V=Vent, P=Plant, D=Desk, O=Chair, T=Table)"
+        self.status.text = f"Floor {floor_label(self.current_floor)}  •  Tool: [b]{self.tool}[/b]  •  Grid: {GRID}px   (Ctrl+S=Save, Ctrl+O=Load, 1..9=Tools)"
         self.status.markup = True
 
 class LevelEditorRoot(FloatLayout):
@@ -487,13 +505,9 @@ class LevelEditorRoot(FloatLayout):
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
 
-        self.scenery_spinner = Spinner(text="Scenery", values=("Elevator","Rug","Vent","Plant","Desk","Chair","Table"), size_hint=(None,1), width=120)
+        self.scenery_spinner = Spinner(text="Scenery", values=SCENERY_TOOLS, size_hint=(None,1), width=150)
         self.scenery_spinner.bind(text=self._on_scenery_select)
         self.toolbar.add_widget(self.scenery_spinner)
-
-        self.button_spinner = Spinner(text="Button", values=("red","green","blue","yellow","white","black","brown"), size_hint=(None,1), width=100)
-        self.button_spinner.bind(text=self._on_button_select)
-        self.toolbar.add_widget(self.button_spinner)
 
         self.toolbar.add_widget(self._tool_button("Save"))
 
@@ -561,21 +575,10 @@ class LevelEditorRoot(FloatLayout):
         # Number keys -> tools
         mapping = {
             '1':"Pan", '2':"Wall", '3':"Agent", '4':"Start",
-            '5':"Hole", '6':"Elevator", '7':"Rug", '8':"Erase",
-            '9':"StairUp", '0':"StairDown"
+            '5':"Hole", '6':"Door", '7':"StairUp", '8':"StairDown", '9':"Erase"
         }
         if codepoint in mapping:
             self._select_tool(mapping[codepoint]); return True
-        if codepoint in ('v','V'):
-            self._select_tool("Vent"); return True
-        if codepoint in ('p','P'):
-            self._select_tool("Plant"); return True
-        if codepoint in ('d','D'):
-            self._select_tool("Desk"); return True
-        if codepoint in ('o','O'):
-            self._select_tool("Chair"); return True
-        if codepoint in ('t','T'):
-            self._select_tool("Table"); return True
         return False
 
     def _find_levels(self):
@@ -597,14 +600,6 @@ class LevelEditorRoot(FloatLayout):
         if text == "Scenery":
             return
         self._select_tool(text)
-        spinner.text = "Scenery"
-
-    def _on_button_select(self, spinner, text):
-        if text == "Button":
-            return
-        self.canvas_view.button_color = text
-        self._select_tool("Button")
-        spinner.text = "Button"
 
     def _on_color_select(self, spinner, text):
         self.canvas_view.door_color = text
