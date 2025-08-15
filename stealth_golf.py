@@ -608,8 +608,17 @@ class StealthGolf(Widget):
                         rx, ry, rw, rh = s["rect"]
                         if rx <= self.ball.x <= rx + rw and ry <= self.ball.y <= ry + rh:
                             currently_on_stairs = True
-                            if not self.on_stairs and self.transition_cooldown <= 0:
-                                target = s.get("target", self.current_floor + (1 if s["dir"] == "up" else -1))
+                            midpoint = ry + rh * 0.5
+                            crossed_mid = (
+                                self.ball.y >= midpoint
+                                if s.get("dir", "up") == "up"
+                                else self.ball.y <= midpoint
+                            )
+                            if crossed_mid and not self.on_stairs and self.transition_cooldown <= 0:
+                                target = s.get(
+                                    "target",
+                                    self.current_floor + (1 if s.get("dir", "up") == "up" else -1),
+                                )
                                 if 0 <= target < len(self.floors):
                                     self.prev_walls = list(self.walls_drawn)
                                     self.prev_decor = list(self.decor)
