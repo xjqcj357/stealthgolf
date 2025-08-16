@@ -819,7 +819,7 @@ class StealthGolf(Widget):
                 col = DOOR_COLORS.get(d.get("color", "red"), (0.7, 0.1, 0.1))
                 Color(col[0], col[1], col[2], self.floor_fade_t)
                 Rectangle(pos=(rx, ry), size=(rw, rh))
-                Color(0.1, 0.1, 0.1, self.floor_fade_t)
+                Color(col[0], col[1], col[2], self.floor_fade_t)
                 Rectangle(pos=(sx, sy), size=(sw, sh))
             if self.hacking_door and self.hack_timer > 0:
                 sx, sy, sw, sh = self.hacking_door["screen"]

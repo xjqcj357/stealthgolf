@@ -373,7 +373,7 @@ class LevelCanvas(Widget):
                 r,g,b = COLOR_MAP.get(d.get("color","red"), (0.8,0,0))
                 Color(r,g,b,1.0)
                 Rectangle(pos=(rx,ry), size=(rw,rh))
-                Color(1,1,1,0.2)
+                Color(r,g,b,0.3)
                 Rectangle(pos=(sx,sy), size=(sw,sh))
                 Color(1,1,1,0.8)
                 Line(rectangle=(sx,sy,sw,sh), width=1.1)
