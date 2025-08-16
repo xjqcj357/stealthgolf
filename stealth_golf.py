@@ -825,9 +825,9 @@ class StealthGolf(Widget):
                 sx, sy, sw, sh = self.hacking_door["screen"]
                 pct = 1.0 - (self.hack_timer / HACK_DURATION)
                 Color(0.2, 0.8, 0.2, 1)
-                Rectangle(pos=(sx, sy + sh + 4), size=(sw * pct, 4))
+                Rectangle(pos=(sx, sy + sh + 4), size=(sw * pct, 12))
                 Color(1, 1, 1, 1)
-                Line(rectangle=(sx, sy + sh + 4, sw, 4), width=1)
+                Line(rectangle=(sx, sy + sh + 4, sw, 12), width=1)
             # Stairs
             for s in self.stairs:
                 rx, ry, rw, rh = s["rect"]
