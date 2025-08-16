@@ -221,8 +221,11 @@ class Ball:
         if speed < 5:
             self.vx = self.vy = 0.0; self.in_motion = False
         else:
-            base_fric = 0.985
-            self.vx *= base_fric; self.vy *= base_fric
+            # Base friction factor expressed per 60 FPS frame.  Raise to
+            # ``dt * 60`` so damping remains consistent regardless of frame rate.
+            base_fric = 0.985  # per-frame at 60 FPS
+            fric = base_fric ** max(1.0, dt * 60.0)
+            self.vx *= fric; self.vy *= fric
 
             # Extra *low-speed damping*: quickly but smoothly bleed velocity
             if speed < LOW_SPEED_THRESHOLD:
