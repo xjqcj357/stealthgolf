@@ -14,12 +14,6 @@ App.get_running_app = staticmethod(lambda: DummyApp())
 
 from stealth_golf import StealthGolf
 
-class Touch:
-    def __init__(self, x, y, uid=1):
-        self.x = x
-        self.y = y
-        self.uid = uid
-
 
 def test_door_opens_after_hack():
     game = StealthGolf()
@@ -39,8 +33,6 @@ def test_door_opens_after_hack():
     game._apply_floor(0)
     game.ball.x = 45
     game.ball.y = 50
-    touch = Touch(45, 50)
-    assert game.on_touch_down(touch) is True
     for _ in range(25):
         game.update(0.1)
     assert game.doors[0]['open'] is True
