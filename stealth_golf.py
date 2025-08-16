@@ -428,7 +428,6 @@ class StealthGolf(Widget):
         self.on_stairs = False
         self.hacking_door = None
         self.hack_timer = 0.0
-        self.hacking_touch_id = None
 
     def _apply_floor(self, idx):
         f = self.floors[idx]
@@ -506,7 +505,6 @@ class StealthGolf(Widget):
         # Reset hacking state when switching floors
         self.hacking_door = None
         self.hack_timer = 0.0
-        self.hacking_touch_id = None
 
     def _fallback_level(self):
         return {
@@ -586,9 +584,6 @@ class StealthGolf(Widget):
         if touch.x > self.width - 140 and touch.y > self.height - 80:
             self.mode_idx = (self.mode_idx + 1) % len(self.modes); return True
         wx, wy = self.screen_to_world(touch.x, touch.y)
-        if self.hacking_door:
-            self.hacking_touch_id = touch.uid
-            return True
         if length(wx - self.ball.x, wy - self.ball.y) <= self.ball.r + 36 and not self.ball.in_motion:
             self.aiming=True; self.aim_touch_id=touch.uid; self.aim_start=(wx,wy); self.aim_current=(wx,wy); return True
         return False
@@ -599,11 +594,6 @@ class StealthGolf(Widget):
         return False
 
     def on_touch_up(self, touch):
-        if self.hacking_door and (self.hacking_touch_id is None or touch.uid == self.hacking_touch_id):
-            self.hacking_door = None
-            self.hack_timer = 0.0
-            self.hacking_touch_id = None
-            return True
         if self.aiming and touch.uid == self.aim_touch_id:
             sx, sy = self.aim_start; cx, cy = self.aim_current
             ix, iy = (sx - cx), (sy - cy)
@@ -651,7 +641,6 @@ class StealthGolf(Widget):
                         if sx <= self.ball.x <= sx + sw and sy <= self.ball.y <= sy + sh:
                             self.hacking_door = d
                             self.hack_timer = HACK_DURATION
-                            self.hacking_touch_id = None
                             break
                 # Door hacking progress
                 if self.hacking_door:
@@ -659,7 +648,6 @@ class StealthGolf(Widget):
                     if not (sx <= self.ball.x <= sx + sw and sy <= self.ball.y <= sy + sh):
                         self.hacking_door = None
                         self.hack_timer = 0.0
-                        self.hacking_touch_id = None
                     else:
                         self.hack_timer = max(0.0, self.hack_timer - dt)
                         if self.hack_timer <= 0.0:
@@ -670,7 +658,6 @@ class StealthGolf(Widget):
                             if rect in self.colliders:
                                 self.colliders.remove(rect)
                             self.hacking_door = None
-                            self.hacking_touch_id = None
                 for a in self.agents:
                     caught = a.update(dt, self.ball, self.colliders)
                     if caught and not self.win:
@@ -906,7 +893,6 @@ class StealthGolf(Widget):
         self.on_stairs = False
         self.hacking_door = None
         self.hack_timer = 0.0
-        self.hacking_touch_id = None
         for d in self.doors:
             d["open"] = d.get("initial_open", False)
             if "_src" in d:
