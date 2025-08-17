@@ -1076,10 +1076,13 @@ class StartMenuScreen(Screen):
 
         layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
         play_btn = Button(text="Play", size_hint=(1, None), height=80)
+        markers_btn = Button(text="Ball Markers", size_hint=(1, None), height=80)
         skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
         play_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "game"))
+        markers_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "markers"))
         skins_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "skins"))
         layout.add_widget(play_btn)
+        layout.add_widget(markers_btn)
         layout.add_widget(skins_btn)
         self.add_widget(layout)
 
@@ -1139,12 +1142,85 @@ class SkinMenuScreen(Screen):
             Ellipse(pos=(x, y), size=(size, size))
 
     def on_ok(self, *args):
-        self.app.save_selected_color()
+        self.app.save_data()
         self.manager.current = "start"
 
     def on_back(self, *args):
         self.app.selected_color = getattr(self, "original_color", self.app.selected_color)
         self.manager.current = "start"
+
+
+class BallMarkerMenuScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.app = App.get_running_app()
+        root = BoxLayout(orientation="vertical", padding=20, spacing=20)
+
+        self.marker_label = Label(text="Markers: 0", size_hint=(1, None), height=40)
+        root.add_widget(self.marker_label)
+
+        root.add_widget(Label(text="Colors", size_hint=(1, None), height=30))
+        color_grid = GridLayout(cols=1, spacing=10, size_hint=(1, None), height=150)
+        self.color_items = [
+            ("Red", 1),
+            ("Green", 2),
+            ("Blue", 3),
+        ]
+        self.color_buttons = {}
+        for name, cost in self.color_items:
+            btn = Button(text="", size_hint=(1, None), height=40)
+            btn.bind(on_release=lambda _btn, n=name, c=cost: self.purchase("color", n, c))
+            self.color_buttons[name] = (btn, cost)
+            color_grid.add_widget(btn)
+        root.add_widget(color_grid)
+
+        root.add_widget(Label(text="Abilities", size_hint=(1, None), height=30))
+        ability_grid = GridLayout(cols=1, spacing=10, size_hint=(1, None), height=150)
+        self.ability_items = [
+            ("Speed Boost", 2),
+            ("Stealth Cloak", 3),
+        ]
+        self.ability_buttons = {}
+        for name, cost in self.ability_items:
+            btn = Button(text="", size_hint=(1, None), height=40)
+            btn.bind(on_release=lambda _btn, n=name, c=cost: self.purchase("ability", n, c))
+            self.ability_buttons[name] = (btn, cost)
+            ability_grid.add_widget(btn)
+        root.add_widget(ability_grid)
+
+        back_btn = Button(text="Back", size_hint=(1, None), height=50)
+        back_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "start"))
+        root.add_widget(back_btn)
+
+        self.add_widget(root)
+
+    def on_pre_enter(self, *args):
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.marker_label.text = f"Markers: {self.app.marker_count}"
+        for name, (btn, cost) in self.color_buttons.items():
+            owned = name in self.app.owned_colors
+            status = "Owned" if owned else f"{cost} marker{'s' if cost != 1 else ''}"
+            btn.text = f"{name} - {status}"
+            btn.disabled = owned
+        for name, (btn, cost) in self.ability_buttons.items():
+            owned = name in self.app.owned_abilities
+            status = "Owned" if owned else f"{cost} marker{'s' if cost != 1 else ''}"
+            btn.text = f"{name} - {status}"
+            btn.disabled = owned
+
+    def purchase(self, typ, name, cost):
+        if typ == "color":
+            owned_set = self.app.owned_colors
+        else:
+            owned_set = self.app.owned_abilities
+        if name in owned_set or self.app.marker_count < cost:
+            return
+        self.app.marker_count -= cost
+        owned_set.add(name)
+        self.app.save_data()
+        self.update_buttons()
 
 
 class GameScreen(Screen):
@@ -1164,22 +1240,36 @@ class StealthGolfApp(App):
         super().__init__(**kwargs)
         self.config_path = os.path.join(os.path.dirname(__file__), "skin_config.json")
         self.selected_color = (0.95, 0.95, 0.95, 1)
-        self._load_selected_color()
+        self.marker_count = 0
+        self.owned_colors = set()
+        self.owned_abilities = set()
+        self._load_data()
 
-    def _load_selected_color(self):
+    def _load_data(self):
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             col = data.get("selected_color")
             if isinstance(col, (list, tuple)) and len(col) in (3, 4):
                 self.selected_color = tuple(col)
+            self.marker_count = data.get("marker_count", 0)
+            self.owned_colors = set(data.get("owned_colors", []))
+            self.owned_abilities = set(data.get("owned_abilities", []))
         except Exception:
             pass
 
-    def save_selected_color(self):
+    def save_data(self):
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump({"selected_color": self.selected_color}, f)
+                json.dump(
+                    {
+                        "selected_color": self.selected_color,
+                        "marker_count": self.marker_count,
+                        "owned_colors": list(self.owned_colors),
+                        "owned_abilities": list(self.owned_abilities),
+                    },
+                    f,
+                )
         except Exception:
             pass
 
@@ -1187,6 +1277,7 @@ class StealthGolfApp(App):
         sm = ScreenManager()
         sm.add_widget(StartMenuScreen(name="start"))
         sm.add_widget(SkinMenuScreen(name="skins"))
+        sm.add_widget(BallMarkerMenuScreen(name="markers"))
         sm.add_widget(GameScreen(name="game"))
         return sm
 
