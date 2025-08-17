@@ -5,6 +5,7 @@
 #
 import json, os, sys, runpy
 from math import sin, cos, atan2, sqrt, radians, pi
+from array import array
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -243,6 +244,95 @@ class Ball:
         if self.smoke_timer > 0:
             self.smoke_timer = max(0.0, self.smoke_timer - dt)
 
+# ---------------------------- GPU Flashlight ------------------------------
+_gpu_flashlight_ctx = None
+
+
+class _FlashlightGPU:
+    """Helper that dispatches a GLSL shader to compute visibility."""
+
+    def __init__(self):
+        from kivy.graphics import Fbo, Rectangle
+        from kivy.graphics.texture import Texture
+
+        shader_path = os.path.join(os.path.dirname(__file__), "shaders", "flashlight.glsl")
+        self.shader_path = shader_path
+        self.fbo = None
+        self.rect = None
+        self.coll_tex = None
+        self.max_colliders = 0
+        self.Fbo = Fbo
+        self.Rectangle = Rectangle
+        self.Texture = Texture
+
+    def _ensure_fbo(self, steps):
+        if self.fbo is None or self.fbo.size[0] != steps + 1:
+            self.fbo = self.Fbo(size=(steps + 1, 1), use_float=True)
+            self.fbo.shader.source = self.shader_path
+            with self.fbo:
+                self.rect = self.Rectangle(pos=(0, 0), size=(steps + 1, 1))
+
+    def _ensure_colliders(self, colliders):
+        count = len(colliders)
+        if self.coll_tex is None or count > self.max_colliders:
+            # Create/resize collider texture. Each texel stores x,y,w,h.
+            self.coll_tex = self.Texture.create(
+                size=(max(1, count), 1), colorfmt="rgba", bufferfmt="float"
+            )
+            self.max_colliders = count
+
+        if count:
+            buf = array("f")
+            for rect in colliders:
+                buf.extend(rect)
+            self.coll_tex.blit_buffer(
+                buf.tobytes(), colorfmt="rgba", bufferfmt="float"
+            )
+
+    def compute(self, agent, colliders):
+        from math import cos, sin
+
+        steps = agent.ray_steps
+        self._ensure_fbo(steps)
+        self._ensure_colliders(colliders)
+
+        fbo = self.fbo
+        fbo["origin"] = (agent.x, agent.y)
+        fbo["base_ang"] = agent._angle_dir()
+        fbo["fov_half"] = agent.fov_half
+        fbo["cone_len"] = agent.cone_len
+        fbo["ray_steps"] = float(steps)
+        fbo["collider_count"] = len(colliders)
+        fbo["colliders"] = 0
+
+        if self.coll_tex:
+            self.coll_tex.bind()
+
+        fbo.draw()
+
+        data = array("f", fbo.texture.pixels)
+        base_ang = agent._angle_dir()
+        start_ang = base_ang + agent.fov_half
+        end_ang = base_ang - agent.fov_half
+        pts = []
+        for i in range(steps + 1):
+            tnorm = data[i * 4]
+            dist = tnorm * agent.cone_len
+            ang = start_ang + (end_ang - start_ang) * (i / float(steps))
+            dx, dy = cos(ang), sin(ang)
+            pts.append((agent.x + dx * dist, agent.y + dy * dist))
+        return pts
+
+
+def _get_gpu_flashlight():
+    global _gpu_flashlight_ctx
+    if _gpu_flashlight_ctx is None:
+        try:
+            _gpu_flashlight_ctx = _FlashlightGPU()
+        except Exception:
+            _gpu_flashlight_ctx = False
+    return _gpu_flashlight_ctx if _gpu_flashlight_ctx else None
+
 class Agent:
     def __init__(self, ax, ay, bx, by, speed=70, fov_deg=55, cone_len=220):
         self.ax, self.ay = ax, ay
@@ -311,27 +401,39 @@ class Agent:
                     self.look_dirx, self.look_diry = vxn, vyn
         return length(ball.x - self.x, ball.y - self.y) <= (ball.r + 10)
     def compute_flashlight_polygon(self, colliders):
+        gpu = _get_gpu_flashlight()
+        if gpu is not None:
+            try:
+                return gpu.compute(self, colliders)
+            except Exception:
+                pass
+        return self._compute_flashlight_polygon_cpu(colliders)
+
+    def _compute_flashlight_polygon_cpu(self, colliders):
         from math import cos, sin
         base_ang = self._angle_dir()
         start_ang = base_ang + self.fov_half
-        end_ang   = base_ang - self.fov_half
+        end_ang = base_ang - self.fov_half
         pts = []
         for i in range(self.ray_steps + 1):
             t = i / float(self.ray_steps)
             ang = start_ang + (end_ang - start_ang) * t
             dx, dy = cos(ang), sin(ang)
-            hit_pt = None; nearest_d2 = None
-            tx = self.x + dx * self.cone_len; ty = self.y + dy * self.cone_len
+            hit_pt = None
+            nearest_d2 = None
+            tx = self.x + dx * self.cone_len
+            ty = self.y + dy * self.cone_len
             for rect in colliders:
                 pt = ray_rect_nearest_hit(self.x, self.y, dx, dy, rect)
                 if pt is not None:
-                    d2 = (pt[0] - self.x)**2 + (pt[1] - self.y)**2
+                    d2 = (pt[0] - self.x) ** 2 + (pt[1] - self.y) ** 2
                     if nearest_d2 is None or d2 < nearest_d2:
-                        nearest_d2 = d2; hit_pt = pt
+                        nearest_d2 = d2
+                        hit_pt = pt
             if hit_pt is None:
                 pts.append((tx, ty))
             else:
-                if nearest_d2 is not None and nearest_d2 > (self.cone_len*self.cone_len):
+                if nearest_d2 is not None and nearest_d2 > (self.cone_len * self.cone_len):
                     pts.append((tx, ty))
                 else:
                     pts.append(hit_pt)
