@@ -261,16 +261,21 @@ class _FlashlightGPU:
         self.rect = None
         self.coll_tex = None
         self.max_colliders = 0
+        # textures holding per-agent parameters
+        self.agent_tex0 = None
+        self.agent_tex1 = None
+        self.max_agents = 0
         self.Fbo = Fbo
         self.Rectangle = Rectangle
         self.Texture = Texture
 
-    def _ensure_fbo(self, steps):
-        if self.fbo is None or self.fbo.size[0] != steps + 1:
-            self.fbo = self.Fbo(size=(steps + 1, 1), use_float=True)
+    def _ensure_fbo(self, steps, agent_count=1):
+        width = (steps + 1) * agent_count
+        if self.fbo is None or self.fbo.size[0] != width:
+            self.fbo = self.Fbo(size=(width, 1), use_float=True)
             self.fbo.shader.source = self.shader_path
             with self.fbo:
-                self.rect = self.Rectangle(pos=(0, 0), size=(steps + 1, 1))
+                self.rect = self.Rectangle(pos=(0, 0), size=(width, 1))
 
     def _ensure_colliders(self, colliders):
         count = len(colliders)
@@ -289,39 +294,74 @@ class _FlashlightGPU:
                 buf.tobytes(), colorfmt="rgba", bufferfmt="float"
             )
 
-    def compute(self, agent, colliders):
+    def _ensure_agents(self, agents):
+        count = len(agents)
+        if self.agent_tex0 is None or count > self.max_agents:
+            self.agent_tex0 = self.Texture.create(
+                size=(max(1, count), 1), colorfmt="rgba", bufferfmt="float"
+            )
+            self.agent_tex1 = self.Texture.create(
+                size=(max(1, count), 1), colorfmt="rgba", bufferfmt="float"
+            )
+            self.max_agents = count
+
+        if count:
+            buf0 = array("f")
+            buf1 = array("f")
+            for a in agents:
+                base_ang = a._angle_dir()
+                buf0.extend([a.x, a.y, base_ang, a.fov_half])
+                buf1.extend([a.cone_len, 0.0, 0.0, 0.0])
+            self.agent_tex0.blit_buffer(buf0.tobytes(), colorfmt="rgba", bufferfmt="float")
+            self.agent_tex1.blit_buffer(buf1.tobytes(), colorfmt="rgba", bufferfmt="float")
+
+    def compute_all(self, agents, colliders):
         from math import cos, sin
 
-        steps = agent.ray_steps
-        self._ensure_fbo(steps)
+        if not agents:
+            return []
+        steps = agents[0].ray_steps
+        self._ensure_fbo(steps, len(agents))
         self._ensure_colliders(colliders)
+        self._ensure_agents(agents)
 
         fbo = self.fbo
-        fbo["origin"] = (agent.x, agent.y)
-        fbo["base_ang"] = agent._angle_dir()
-        fbo["fov_half"] = agent.fov_half
-        fbo["cone_len"] = agent.cone_len
         fbo["ray_steps"] = float(steps)
+        fbo["agent_count"] = float(len(agents))
         fbo["collider_count"] = len(colliders)
         fbo["colliders"] = 0
+        fbo["agent0"] = 1
+        fbo["agent1"] = 2
 
         if self.coll_tex:
-            self.coll_tex.bind()
+            self.coll_tex.bind(texture_unit=0)
+        if self.agent_tex0:
+            self.agent_tex0.bind(texture_unit=1)
+        if self.agent_tex1:
+            self.agent_tex1.bind(texture_unit=2)
 
         fbo.draw()
 
         data = array("f", fbo.texture.pixels)
-        base_ang = agent._angle_dir()
-        start_ang = base_ang + agent.fov_half
-        end_ang = base_ang - agent.fov_half
-        pts = []
-        for i in range(steps + 1):
-            tnorm = data[i * 4]
-            dist = tnorm * agent.cone_len
-            ang = start_ang + (end_ang - start_ang) * (i / float(steps))
-            dx, dy = cos(ang), sin(ang)
-            pts.append((agent.x + dx * dist, agent.y + dy * dist))
-        return pts
+        results = []
+        width = steps + 1
+        for ai, a in enumerate(agents):
+            base_ang = a._angle_dir()
+            start_ang = base_ang + a.fov_half
+            end_ang = base_ang - a.fov_half
+            pts = []
+            offset = ai * width
+            for i in range(steps + 1):
+                tnorm = data[(offset + i) * 4]
+                dist = tnorm * a.cone_len
+                ang = start_ang + (end_ang - start_ang) * (i / float(steps))
+                dx, dy = cos(ang), sin(ang)
+                pts.append((a.x + dx * dist, a.y + dy * dist))
+            results.append(pts)
+        return results
+
+    def compute(self, agent, colliders):
+        return self.compute_all([agent], colliders)[0]
 
 
 def _get_gpu_flashlight():
@@ -400,11 +440,13 @@ class Agent:
                     self.x += vxn * step; self.y += vyn * step
                     self.look_dirx, self.look_diry = vxn, vyn
         return length(ball.x - self.x, ball.y - self.y) <= (ball.r + 10)
-    def compute_flashlight_polygon(self, colliders):
+    def compute_flashlight_polygon(self, colliders, precomputed=None):
+        if precomputed is not None:
+            return precomputed
         gpu = _get_gpu_flashlight()
         if gpu is not None:
             try:
-                return gpu.compute(self, colliders)
+                return gpu.compute_all([self], colliders)[0]
             except Exception:
                 pass
         return self._compute_flashlight_polygon_cpu(colliders)
@@ -859,8 +901,19 @@ class StealthGolf(Widget):
                     Rectangle(pos=(rx, ry), size=(rw, rh))
 
     def _draw_agent_lights(self, agents, alpha):
-        for a in agents:
-            pts = a.compute_flashlight_polygon(self.colliders)
+        if not agents:
+            return
+        gpu = _get_gpu_flashlight()
+        polys = None
+        if gpu is not None:
+            try:
+                polys = gpu.compute_all(agents, self.colliders)
+            except Exception:
+                polys = None
+        if polys is None:
+            polys = [a._compute_flashlight_polygon_cpu(self.colliders) for a in agents]
+        for a, pts in zip(agents, polys):
+            pts = a.compute_flashlight_polygon(self.colliders, precomputed=pts)
             verts = [(a.x, a.y, 0, 0)] + [(x, y, 0, 0) for (x, y) in pts]
             idx = []
             for i in range(1, len(verts) - 1):
