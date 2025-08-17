@@ -140,6 +140,14 @@ DOOR_COLORS = {
     "brown": (0.45, 0.33, 0.2),
 }
 
+# Abilities available for purchase.  Each entry defines a human readable name
+# and a notional cost.  The abilities themselves are not yet implemented; they
+# simply act as metadata for the shop UI and configuration tracking.
+ABILITY_METADATA = {
+    "speed_boost": {"name": "Speed Boost", "cost": 100},
+    "ghost_mode": {"name": "Ghost Mode", "cost": 150},
+}
+
 # -------------------------------- Utilities ----------------------------------
 
 def _search_paths(names):
@@ -522,6 +530,17 @@ class StealthGolf(Widget):
 
         Clock.schedule_interval(self.update, 1.0/60.0)
 
+        # Label to indicate purchased abilities are pending implementation
+        self.ability_label = Label(
+            text="",
+            font_size=16,
+            color=(1, 1, 1, 1),
+            size_hint=(None, None),
+            pos=(10, 10),
+        )
+        self.add_widget(self.ability_label)
+        self._logged_abilities = set()
+
     # --------- Level I/O ----------
     def _load_level_data_from_path(self, path):
         if path.endswith(".json"):
@@ -849,7 +868,7 @@ class StealthGolf(Widget):
                 self.prev_walls = []
                 self.prev_decor = []
                 self.prev_agents = []
-        self._update_camera(); self.draw()
+        self._update_camera(); self.draw(); self._update_abilities()
 
     # ------------- Camera -------------
     def _update_camera(self):
@@ -859,6 +878,22 @@ class StealthGolf(Widget):
         self.cam_x = clamp(desired_cx, 0, self.world_w - self.width)
         self.cam_y = clamp(desired_cy, 0, self.world_h - self.height)
     def screen_to_world(self, sx, sy): return (sx + self.cam_x, sy + self.cam_y)
+
+    def _update_abilities(self):
+        app = App.get_running_app()
+        names = []
+        for key in getattr(app, "purchased_abilities", []):
+            meta = ABILITY_METADATA.get(key)
+            if not meta:
+                continue
+            names.append(meta["name"])
+            if key not in self._logged_abilities:
+                print(f"Ability '{meta['name']}' effect pending implementation.")
+                self._logged_abilities.add(key)
+        if names:
+            self.ability_label.text = ", ".join(names) + " (pending implementation)"
+        else:
+            self.ability_label.text = ""
 
     def _draw_decor(self, decor_list, alpha):
         for d in decor_list:
@@ -1077,10 +1112,13 @@ class StartMenuScreen(Screen):
         layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
         play_btn = Button(text="Play", size_hint=(1, None), height=80)
         skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
+        abilities_btn = Button(text="Abilities", size_hint=(1, None), height=80)
         play_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "game"))
         skins_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "skins"))
+        abilities_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "abilities"))
         layout.add_widget(play_btn)
         layout.add_widget(skins_btn)
+        layout.add_widget(abilities_btn)
         self.add_widget(layout)
 
     def _update_bg_rect(self, *args):
@@ -1139,12 +1177,52 @@ class SkinMenuScreen(Screen):
             Ellipse(pos=(x, y), size=(size, size))
 
     def on_ok(self, *args):
-        self.app.save_selected_color()
+        self.app.save_config()
         self.manager.current = "start"
 
     def on_back(self, *args):
         self.app.selected_color = getattr(self, "original_color", self.app.selected_color)
         self.manager.current = "start"
+
+
+class BallMarkerMenuScreen(Screen):
+    """Simple ability shop menu."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.app = App.get_running_app()
+        root = BoxLayout(orientation="vertical", padding=20, spacing=20)
+        self.grid = GridLayout(cols=1, spacing=10, size_hint=(1, None))
+        self.grid.bind(minimum_height=self.grid.setter("height"))
+        self.buttons = {}
+        for key, meta in ABILITY_METADATA.items():
+            btn = Button(text=self._btn_text(key), size_hint=(1, None), height=60)
+            btn.bind(on_release=lambda _btn, k=key: self.purchase(k))
+            self.grid.add_widget(btn)
+            self.buttons[key] = btn
+        root.add_widget(self.grid)
+        back_btn = Button(text="Back", size_hint=(1, None), height=60)
+        back_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "start"))
+        root.add_widget(back_btn)
+        self.add_widget(root)
+
+    def _btn_text(self, key):
+        if key in self.app.purchased_abilities:
+            return f"{ABILITY_METADATA[key]['name']} - Purchased"
+        return f"{ABILITY_METADATA[key]['name']} - {ABILITY_METADATA[key]['cost']}"
+
+    def on_pre_enter(self, *args):
+        self.refresh_buttons()
+
+    def refresh_buttons(self):
+        for key, btn in self.buttons.items():
+            btn.text = self._btn_text(key)
+
+    def purchase(self, key):
+        if key not in self.app.purchased_abilities:
+            self.app.purchased_abilities.append(key)
+            self.app.save_config()
+        self.refresh_buttons()
 
 
 class GameScreen(Screen):
@@ -1164,29 +1242,42 @@ class StealthGolfApp(App):
         super().__init__(**kwargs)
         self.config_path = os.path.join(os.path.dirname(__file__), "skin_config.json")
         self.selected_color = (0.95, 0.95, 0.95, 1)
-        self._load_selected_color()
+        self.purchased_abilities = []
+        self._load_config()
 
-    def _load_selected_color(self):
+    def _load_config(self):
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             col = data.get("selected_color")
             if isinstance(col, (list, tuple)) and len(col) in (3, 4):
                 self.selected_color = tuple(col)
+            self.purchased_abilities = list(data.get("purchased_abilities", []))
         except Exception:
             pass
 
-    def save_selected_color(self):
+    def save_config(self):
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump({"selected_color": self.selected_color}, f)
+                json.dump(
+                    {
+                        "selected_color": self.selected_color,
+                        "purchased_abilities": self.purchased_abilities,
+                    },
+                    f,
+                )
         except Exception:
             pass
+
+    # Backwards-compatibility helper
+    def save_selected_color(self):
+        self.save_config()
 
     def build(self):
         sm = ScreenManager()
         sm.add_widget(StartMenuScreen(name="start"))
         sm.add_widget(SkinMenuScreen(name="skins"))
+        sm.add_widget(BallMarkerMenuScreen(name="abilities"))
         sm.add_widget(GameScreen(name="game"))
         return sm
 
