@@ -586,7 +586,18 @@ class StealthGolf(Widget):
 
         # Decor
         self.decor = []
-        collidable = {"plant", "desk", "chair", "table"}
+        collidable = {
+            "plant",
+            "desk",
+            "chair",
+            "table",
+            "cardboard_box",
+            "tesla_coil",
+            "teleporter_pad",
+            "robotic_arm",
+            "metal_table",
+            "golf_ball",
+        }
         for d in f.get("decor", []):
             if isinstance(d, dict):
                 kind = d.get("kind", "")
@@ -889,6 +900,30 @@ class StealthGolf(Widget):
             elif kind == "table":
                 Color(0.4, 0.3, 0.2, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
                 Color(0.3, 0.22, 0.15, alpha); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+            elif kind == "cardboard_box":
+                Color(0.7, 0.55, 0.3, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+                Color(0.6, 0.45, 0.25, alpha)
+                Line(rectangle=(rx, ry, rw, rh), width=1)
+                Line(points=[rx + rw / 2, ry, rx + rw / 2, ry + rh], width=1)
+            elif kind == "tesla_coil":
+                Color(0.4, 0.4, 0.45, alpha); Rectangle(pos=(rx, ry), size=(rw, rh * 0.2))
+                Color(0.55, 0.3, 0.2, alpha); Rectangle(pos=(rx + rw * 0.4, ry + rh * 0.2), size=(rw * 0.2, rh * 0.5))
+                Color(0.8, 0.8, 0.85, alpha); Ellipse(pos=(rx, ry + rh * 0.7), size=(rw, rh * 0.3))
+            elif kind == "teleporter_pad":
+                Color(0.2, 0.2, 0.25, alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
+                Color(0.0, 0.6, 0.9, alpha); Line(ellipse=(rx, ry, rw, rh), width=2)
+                Color(0.0, 0.8, 1.0, 0.5 * alpha); Ellipse(pos=(rx + rw * 0.2, ry + rh * 0.2), size=(rw * 0.6, rh * 0.6))
+            elif kind == "robotic_arm":
+                Color(0.3, 0.3, 0.35, alpha); Rectangle(pos=(rx, ry), size=(rw, rh * 0.2))
+                Color(0.6, 0.6, 0.62, alpha); Rectangle(pos=(rx + rw * 0.45, ry + rh * 0.2), size=(rw * 0.1, rh * 0.5))
+                Rectangle(pos=(rx + rw * 0.45, ry + rh * 0.7), size=(rw * 0.4, rh * 0.1))
+                Rectangle(pos=(rx + rw * 0.8, ry + rh * 0.7), size=(rw * 0.15, rh * 0.15))
+            elif kind == "metal_table":
+                Color(0.6, 0.6, 0.65, alpha); Rectangle(pos=(rx, ry), size=(rw, rh))
+                Color(0.45, 0.45, 0.5, alpha); Line(rectangle=(rx, ry, rw, rh), width=1.2)
+            elif kind == "golf_ball":
+                Color(0.95, 0.95, 0.95, alpha); Ellipse(pos=(rx, ry), size=(rw, rh))
+                Color(0.85, 0.85, 0.85, alpha); Line(ellipse=(rx, ry, rw, rh), width=1)
             else:
                 col = d.get("color", [0.3, 0.3, 0.35, 1])
                 if len(col) == 3:
