@@ -230,7 +230,7 @@ class LevelCanvas(Widget):
             self.cam_y = max(0, min(self.cam_y, self.world_h - self.height))
             return True
 
-        if self.tool in ("Wall","Elevator","Rug","Vent","Plant","Desk","Chair","Table","StairUp","StairDown","Door") and self.dragging and self.temp_rect:
+        if self.tool in ("Wall", "StairUp", "StairDown", "Door") + SCENERY_TOOLS and self.dragging and self.temp_rect:
             x0,y0,_,_ = self.temp_rect
             x1,y1 = wx, wy
             x = min(x0,x1); y = min(y0,y1)
