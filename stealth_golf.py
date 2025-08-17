@@ -504,6 +504,7 @@ class StealthGolf(Widget):
         self.prev_walls = []
         self.prev_decor = []
         self.prev_agents = []
+        self.prev_markers = []
         self.floor_fade_t = 1.0
 
         # Input/aim
@@ -552,11 +553,13 @@ class StealthGolf(Widget):
                     "agents": data.get("agents", []),
                     "stairs": data.get("ramps", []),
                     "doors": [],
+                    "ball_markers": data.get("ball_markers", []),
                 }
             ]
 
         for f in self.floors:
             f.setdefault("doors", [])
+            f.setdefault("ball_markers", [])
 
         self.current_floor = max(0, min(self.start_floor, len(self.floors) - 1))
         self._apply_floor(self.current_floor)
@@ -647,6 +650,17 @@ class StealthGolf(Widget):
             if not open_state:
                 self.colliders.append(rect)
 
+        # Ball markers
+        self.ball_markers = []
+        for m in f.get("ball_markers", []):
+            if isinstance(m, (list, tuple)) and len(m) >= 3:
+                self.ball_markers.append((m[0], m[1], m[2]))
+            elif isinstance(m, dict):
+                cx = m.get("x", m.get("cx", 0))
+                cy = m.get("y", m.get("cy", 0))
+                r = m.get("r", m.get("radius", 8))
+                self.ball_markers.append((cx, cy, r))
+
         # Reset hacking state when switching floors
         self.hacking_door = None
         self.hack_timer = 0.0
@@ -713,6 +727,7 @@ class StealthGolf(Widget):
         self.level_path = path
         self.level_index = idx
         self._apply_level_data(data)
+        self.prev_markers = []
         self.caught=False; self.win=False; self.message_timer=0.0; self.drop_timer=0.0
         return True
 
@@ -774,6 +789,19 @@ class StealthGolf(Widget):
                 if self.transition_cooldown > 0:
                     self.transition_cooldown = max(0.0, self.transition_cooldown - dt)
                 self.ball.update(dt, self.colliders)
+                if self.ball_markers:
+                    bx, by = self.ball.x, self.ball.y
+                    hit_idx = None
+                    for i, (mx, my, mr) in enumerate(self.ball_markers):
+                        if length(bx - mx, by - my) <= mr:
+                            hit_idx = i
+                            break
+                    if hit_idx is not None:
+                        self.ball_markers.pop(hit_idx)
+                        self.floors[self.current_floor]["ball_markers"] = [list(m) for m in self.ball_markers]
+                        app = App.get_running_app()
+                        app.marker_count = getattr(app, "marker_count", 0) + 1
+                        app.save_selected_color()
                 if not self.hacking_door:
                     for d in self.doors:
                         if d.get("open"):
@@ -834,6 +862,7 @@ class StealthGolf(Widget):
                                     self.prev_walls = list(self.walls_drawn)
                                     self.prev_decor = list(self.decor)
                                     self.prev_agents = list(self.agents)
+                                    self.prev_markers = list(self.ball_markers)
                                     self.floor_fade_t = 0.0
                                     self.current_floor = target
                                     self._apply_floor(self.current_floor)
@@ -849,6 +878,7 @@ class StealthGolf(Widget):
                 self.prev_walls = []
                 self.prev_decor = []
                 self.prev_agents = []
+                self.prev_markers = []
         self._update_camera(); self.draw()
 
     # ------------- Camera -------------
@@ -983,6 +1013,14 @@ class StealthGolf(Widget):
                 for i in range(steps):
                     y = ry + (i/steps)*rh
                     Line(points=[rx, y, rx+rw, y], width=1)
+            # Ball markers
+            if self.prev_markers:
+                Color(0.9,0.8,0.2,1.0 - self.floor_fade_t)
+                for cx, cy, r in self.prev_markers:
+                    Ellipse(pos=(cx - r, cy - r), size=(r*2, r*2))
+            Color(0.9,0.8,0.2,self.floor_fade_t)
+            for cx, cy, r in self.ball_markers:
+                Ellipse(pos=(cx - r, cy - r), size=(r*2, r*2))
             # Lights (occluded)
             self._draw_agent_lights(self.prev_agents, 1.0 - self.floor_fade_t)
             self._draw_agent_lights(self.agents, self.floor_fade_t)
@@ -1054,6 +1092,8 @@ class StealthGolf(Widget):
                     self.colliders.append(rect)
         for a in self.agents:
             a.x,a.y = a.ax,a.ay; a.dir=1; a.chasing=False; a.look_dirx, a.look_diry = normalize(a.bx-a.ax, a.by-a.ay)
+        self.ball_markers = [tuple(m) for m in self.floors[self.current_floor].get("ball_markers", [])]
+        self.prev_markers = []
 
 # ----------------------------- Screens & App ---------------------------------
 
@@ -1164,6 +1204,8 @@ class StealthGolfApp(App):
         super().__init__(**kwargs)
         self.config_path = os.path.join(os.path.dirname(__file__), "skin_config.json")
         self.selected_color = (0.95, 0.95, 0.95, 1)
+        self.marker_count = 0
+        self.purchased_items = []
         self._load_selected_color()
 
     def _load_selected_color(self):
@@ -1173,13 +1215,19 @@ class StealthGolfApp(App):
             col = data.get("selected_color")
             if isinstance(col, (list, tuple)) and len(col) in (3, 4):
                 self.selected_color = tuple(col)
+            self.marker_count = int(data.get("marker_count", 0))
+            self.purchased_items = data.get("purchased_items", [])
         except Exception:
             pass
 
     def save_selected_color(self):
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump({"selected_color": self.selected_color}, f)
+                json.dump({
+                    "selected_color": self.selected_color,
+                    "marker_count": getattr(self, "marker_count", 0),
+                    "purchased_items": getattr(self, "purchased_items", []),
+                }, f)
         except Exception:
             pass
 

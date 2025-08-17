@@ -79,6 +79,7 @@ class LevelCanvas(Widget):
         self.decor = []  # [{"kind":..., "rect":[x,y,w,h]}]
         self.agents = [] # [{"a":[x,y], "b":[x,y], "speed":..., "fov_deg":..., "cone_len":...}]
         self.doors = []  # [{"rect":..., "screen":..., "color":...}]
+        self.ball_markers = []  # [[x,y,r], ...]
         self.floors = [self._new_floor()]
         self.current_floor = 0
         self._refresh_floor_refs()
@@ -91,6 +92,7 @@ class LevelCanvas(Widget):
         self.dragging = False
         self.drag_start_world = None
         self.temp_rect = None
+        self.temp_marker = None
         self.temp_agent_a = None
         self.pending_door_rect = None
         self.door_color = "red"
@@ -99,7 +101,7 @@ class LevelCanvas(Widget):
         Clock.schedule_interval(self._tick, 1/60)
 
     def _new_floor(self):
-        return {"walls": [], "decor": [], "agents": [], "stairs": [], "doors": []}
+        return {"walls": [], "decor": [], "agents": [], "stairs": [], "doors": [], "ball_markers": []}
 
     def _refresh_floor_refs(self):
         f = self.floors[self.current_floor]
@@ -108,6 +110,7 @@ class LevelCanvas(Widget):
         self.agents = f["agents"]
         self.stairs = f["stairs"]
         self.doors = f.get("doors", [])
+        self.ball_markers = f.get("ball_markers", [])
 
     # --- IO ---
     def save_json(self, path):
@@ -137,6 +140,7 @@ class LevelCanvas(Widget):
             self.floors = data["floors"]
             for f in self.floors:
                 f.setdefault("doors", [])
+                f.setdefault("ball_markers", [])
         else:
             self.floors = [
                 {
@@ -145,6 +149,7 @@ class LevelCanvas(Widget):
                     "agents": data.get("agents", []),
                     "stairs": data.get("ramps", []),
                     "doors": data.get("doors", []),
+                    "ball_markers": data.get("ball_markers", []),
                 }
             ]
         self.current_floor = self.start_floor
@@ -168,6 +173,11 @@ class LevelCanvas(Widget):
         if self.tool in ("Wall","StairUp","StairDown","Door") + SCENERY_TOOLS:
             self.dragging = True
             self.temp_rect = (wx, wy, 1, 1)
+            return True
+
+        if self.tool == "BallMarker":
+            self.dragging = True
+            self.temp_marker = (wx, wy, 1)
             return True
 
         if self.tool == "Agent":
@@ -201,6 +211,10 @@ class LevelCanvas(Widget):
                 d = self.doors[i]
                 if inside_rect(d["rect"]) or inside_rect(d["screen"]):
                     self.doors.pop(i); return True
+            for i in reversed(range(len(self.ball_markers))):
+                cx, cy, r = self.ball_markers[i]
+                if length(wx - cx, wy - cy) <= r:
+                    self.ball_markers.pop(i); return True
             # agents: near segment
             def segdist2(ax,ay,bx,by,px,py):
                 vx,vy = bx-ax, by-ay; wx2,wy2 = px-ax, py-ay
@@ -235,6 +249,12 @@ class LevelCanvas(Widget):
             w = max(1, abs(x1-x0)); h = max(1, abs(y1-y0))
             self.temp_rect = (x,y,w,h); return True
 
+        if self.tool == "BallMarker" and self.dragging and self.temp_marker:
+            cx, cy, _ = self.temp_marker
+            r = max(1, int(length(wx - cx, wy - cy)))
+            self.temp_marker = (cx, cy, r)
+            return True
+
         return False
 
     def on_touch_up(self, touch):
@@ -266,6 +286,14 @@ class LevelCanvas(Widget):
             if hasattr(self.parent, '_update_floor_spinner'):
                 self.parent._update_floor_spinner()
             self.temp_rect = None; self.dragging = False; return True
+
+        if self.tool == "BallMarker" and self.dragging and self.temp_marker:
+            cx, cy, r = self.temp_marker
+            if r >= GRID/2:
+                self.ball_markers.append([cx, cy, r])
+            self.temp_marker = None
+            self.dragging = False
+            return True
 
         if self.tool == "Pan":
             self.dragging = False; self.drag_start_world = None; return True
@@ -392,6 +420,15 @@ class LevelCanvas(Widget):
                     y = ry + (i/steps)*rh
                     Line(points=[rx, y, rx+rw, y], width=1)
 
+            # Ball markers
+            Color(0.9,0.8,0.2,1.0)
+            for cx, cy, r in self.ball_markers:
+                Ellipse(pos=(cx - r, cy - r), size=(r*2, r*2))
+            if self.temp_marker:
+                cx, cy, r = self.temp_marker
+                Color(0.9,0.8,0.2,0.5)
+                Ellipse(pos=(cx - r, cy - r), size=(r*2, r*2))
+
             # Agent paths + occluded cone preview
             for a in self.agents:
                 ax,ay = a["a"]; bx,by = a["b"]
@@ -501,7 +538,7 @@ class LevelEditorRoot(FloatLayout):
 
     def _build_toolbar(self):
         self.toolbar.spacing = 4
-        tools = ["Pan","Wall","Door","Agent","Start","Hole","StairUp","StairDown","Erase"]
+        tools = ["Pan","Wall","Door","Agent","Start","Hole","BallMarker","StairUp","StairDown","Erase"]
         for t in tools:
             self.toolbar.add_widget(self._tool_button(t))
 
@@ -558,6 +595,7 @@ class LevelEditorRoot(FloatLayout):
         self.canvas_view.tool = name
         # cancel in-progress operations
         self.canvas_view.temp_rect = None
+        self.canvas_view.temp_marker = None
         self.canvas_view.temp_agent_a = None
         self.canvas_view.pending_door_rect = None
         self.canvas_view.dragging = False
