@@ -944,7 +944,10 @@ class StealthGolf(Widget):
             if self.ball.smoke_timer > 0:
                 Color(0.35,0.35,0.38,1)
             else:
-                Color(*self.ball.color)
+                # Dim the ball slightly while it's rolling to give subtle motion feedback.
+                shade = 0.8 if self.ball.in_motion else 1.0
+                r, g, b, a = self.ball.color
+                Color(r * shade, g * shade, b * shade, a)
             Ellipse(pos=(self.ball.x-14, self.ball.y-14), size=(28,28))
             # Aim line
             if self.aiming:
