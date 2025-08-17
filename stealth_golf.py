@@ -273,7 +273,8 @@ class _FlashlightGPU:
         width = (steps + 1) * agent_count
         if self.fbo is None or self.fbo.size[0] != width:
             self.fbo = self.Fbo(size=(width, 1), use_float=True)
-            self.fbo.shader.source = self.shader_path
+            with open(self.shader_path, "r", encoding="utf-8") as f:
+                self.fbo.shader.fs = "#define FRAGMENT\n" + f.read()
             with self.fbo:
                 self.rect = self.Rectangle(pos=(0, 0), size=(width, 1))
 

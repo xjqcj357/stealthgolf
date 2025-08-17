@@ -1,3 +1,11 @@
+#ifdef VERTEX
+attribute vec4 pos;
+void main() {
+    gl_Position = vec4(pos.xy, 0.0, 1.0);
+}
+#endif
+
+#ifdef FRAGMENT
 #ifdef GL_ES
 precision highp float;
 #endif
@@ -65,3 +73,5 @@ void main(){
     }
     gl_FragColor = vec4(best / cone_len, 0.0, 0.0, 1.0);
 }
+#endif
+
