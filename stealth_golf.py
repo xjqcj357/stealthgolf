@@ -364,7 +364,7 @@ class StealthGolf(Widget):
         # Input/aim
         self.aiming=False; self.aim_touch_id=None
         self.aim_start=(0,0); self.aim_current=(0,0)
-        self.max_shot=1000.0; self.mode_idx=0; self.modes=["Normal","Smoke"]
+        self.max_shot=1000.0
         self.caught=False; self.win=False; self.message_timer=0.0
         self.drop_total=0.9; self.drop_timer=0.0
 
@@ -581,8 +581,6 @@ class StealthGolf(Widget):
             else:
                 self._reset_to_start()
             return True
-        if touch.x > self.width - 140 and touch.y > self.height - 80:
-            self.mode_idx = (self.mode_idx + 1) % len(self.modes); return True
         wx, wy = self.screen_to_world(touch.x, touch.y)
         if length(wx - self.ball.x, wy - self.ball.y) <= self.ball.r + 36 and not self.ball.in_motion:
             self.aiming=True; self.aim_touch_id=touch.uid; self.aim_start=(wx,wy); self.aim_current=(wx,wy); return True
@@ -602,8 +600,6 @@ class StealthGolf(Widget):
                 ix, iy = normalize(ix, iy); ix*=self.max_shot; iy*=self.max_shot
             scale = 1.90
             self.ball.apply_impulse(ix*scale, iy*scale)
-            if self.modes[self.mode_idx] == "Smoke":
-                self.ball.smoke_timer = 2.6
             self.aiming=False; self.aim_touch_id=None; return True
         return False
 
@@ -853,19 +849,12 @@ class StealthGolf(Widget):
                 sx, sy = self.aim_start; cx2, cy2 = self.aim_current
                 Color(0.9,0.9,1.0,0.7); Line(points=[self.ball.x,self.ball.y,cx2,cy2], width=2)
             PopMatrix()
-            # UI overlay
-            Color(0.18,0.18,0.2,0.8); Rectangle(pos=(self.width - 140, self.height - 60), size=(130, 48))
-            Color(1,1,1,1); Line(rectangle=(self.width - 140, self.height - 60, 130, 48), width=1.2)
             # Fade overlay
             if self.fade_alpha > 0:
                 Color(0,0,0,self.fade_alpha); Rectangle(pos=(0,0), size=(self.width, self.height))
         self._labels()
 
     def _labels(self):
-        if not hasattr(self, "mode_label"):
-            self.mode_label = Label(text="", font_size=16, color=(1,1,1,1), size_hint=(None,None), size=(120,30), pos=(self.width - 132, self.height - 50))
-            self.add_widget(self.mode_label)
-        self.mode_label.text = "Mode: [b]{}[/b]".format(["Normal","Smoke"][self.mode_idx]); self.mode_label.markup=True
         if not hasattr(self, "banner"):
             self.banner = Label(text="", font_size=20, color=(1,1,1,1), size_hint=(None,None), size=(self.width,40), pos=(10, self.height - 90))
             self.add_widget(self.banner)
