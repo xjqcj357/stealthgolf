@@ -59,11 +59,7 @@ SCENERY_KIND_MAP = {
     "Desk": "desk",
     "Chair": "chair",
     "Table": "table",
-    "BigRedButton": "big_red_button",
     "BlueScreen": "blue_screen_monitor",
-    "BigBlueButton": "big_blue_button",
-    "BigGreenButton": "big_green_button",
-    "BigYellowButton": "big_yellow_button",
 }
 SCENERY_TOOLS = tuple(SCENERY_KIND_MAP.keys())
 
@@ -340,31 +336,11 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.3,0.22,0.15,1.0)
                     Line(rectangle=(rx,ry,rw,rh), width=1.2)
-                elif kind == "big_red_button":
-                    Color(0.4,0.4,0.4,1.0)
-                    Ellipse(pos=(rx,ry), size=(rw,rh))
-                    Color(0.8,0.0,0.0,1.0)
-                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
                 elif kind == "blue_screen_monitor":
                     Color(0.1,0.1,0.1,1.0)
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.2,0.4,0.9,1.0)
                     Rectangle(pos=(rx+5, ry+5), size=(rw-10, rh-10))
-                elif kind == "big_blue_button":
-                    Color(0.4,0.4,0.4,1.0)
-                    Ellipse(pos=(rx,ry), size=(rw,rh))
-                    Color(0.0,0.0,0.8,1.0)
-                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
-                elif kind == "big_green_button":
-                    Color(0.4,0.4,0.4,1.0)
-                    Ellipse(pos=(rx,ry), size=(rw,rh))
-                    Color(0.0,0.6,0.0,1.0)
-                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
-                elif kind == "big_yellow_button":
-                    Color(0.4,0.4,0.4,1.0)
-                    Ellipse(pos=(rx,ry), size=(rw,rh))
-                    Color(0.8,0.8,0.0,1.0)
-                    Ellipse(pos=(rx+rw*0.1, ry+rh*0.1), size=(rw*0.8, rh*0.8))
 
             # Doors
             for d in self.doors:
