@@ -32,7 +32,7 @@
       ],
       "decor": [
         {
-          "kind": "table",
+          "kind": "robotic_arm",
           "rect": [
             600,
             1680,

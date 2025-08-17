@@ -60,6 +60,12 @@ SCENERY_KIND_MAP = {
     "Chair": "chair",
     "Table": "table",
     "BlueScreen": "blue_screen_monitor",
+    "CardboardBox": "cardboard_box",
+    "TeslaCoil": "tesla_coil",
+    "TeleporterPad": "teleporter_pad",
+    "RoboticArm": "robotic_arm",
+    "MetalTable": "metal_table",
+    "GolfBall": "golf_ball",
 }
 SCENERY_TOOLS = tuple(SCENERY_KIND_MAP.keys())
 
@@ -341,6 +347,43 @@ class LevelCanvas(Widget):
                     Rectangle(pos=(rx,ry), size=(rw,rh))
                     Color(0.2,0.4,0.9,1.0)
                     Rectangle(pos=(rx+5, ry+5), size=(rw-10, rh-10))
+                elif kind == "cardboard_box":
+                    Color(0.7,0.55,0.3,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.6,0.45,0.25,1.0)
+                    Line(rectangle=(rx,ry,rw,rh), width=1)
+                    Line(points=[rx+rw/2, ry, rx+rw/2, ry+rh], width=1)
+                elif kind == "tesla_coil":
+                    Color(0.4,0.4,0.45,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw, rh*0.2))
+                    Color(0.55,0.3,0.2,1.0)
+                    Rectangle(pos=(rx+rw*0.4, ry+rh*0.2), size=(rw*0.2, rh*0.5))
+                    Color(0.8,0.8,0.85,1.0)
+                    Ellipse(pos=(rx, ry+rh*0.7), size=(rw, rh*0.3))
+                elif kind == "teleporter_pad":
+                    Color(0.2,0.2,0.25,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.0,0.6,0.9,1.0)
+                    Line(ellipse=(rx,ry,rw,rh), width=2)
+                    Color(0.0,0.8,1.0,0.7)
+                    Ellipse(pos=(rx+rw*0.2, ry+rh*0.2), size=(rw*0.6, rh*0.6))
+                elif kind == "robotic_arm":
+                    Color(0.3,0.3,0.35,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw, rh*0.2))
+                    Color(0.6,0.6,0.62,1.0)
+                    Rectangle(pos=(rx+rw*0.45, ry+rh*0.2), size=(rw*0.1, rh*0.5))
+                    Rectangle(pos=(rx+rw*0.45, ry+rh*0.7), size=(rw*0.4, rh*0.1))
+                    Rectangle(pos=(rx+rw*0.8, ry+rh*0.7), size=(rw*0.15, rh*0.15))
+                elif kind == "metal_table":
+                    Color(0.6,0.6,0.65,1.0)
+                    Rectangle(pos=(rx,ry), size=(rw,rh))
+                    Color(0.45,0.45,0.5,1.0)
+                    Line(rectangle=(rx,ry,rw,rh), width=1.2)
+                elif kind == "golf_ball":
+                    Color(0.95,0.95,0.95,1.0)
+                    Ellipse(pos=(rx,ry), size=(rw,rh))
+                    Color(0.85,0.85,0.85,1.0)
+                    Line(ellipse=(rx,ry,rw,rh), width=1)
 
             # Doors
             for d in self.doors:
