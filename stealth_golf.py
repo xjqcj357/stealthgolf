@@ -140,6 +140,20 @@ DOOR_COLORS = {
     "brown": (0.45, 0.33, 0.2),
 }
 
+# Mapping of available ball colors to their marker cost.  Players can
+# purchase these colors in the ``BallMarkerMenuScreen``.  Colors are
+# stored as RGBA tuples so they can be used directly with Kivy's
+# ``Color`` instructions.
+available_colors = {
+    (1, 0, 0, 1): 1,
+    (0, 1, 0, 1): 1,
+    (0, 0, 1, 1): 1,
+    (1, 1, 0, 1): 2,
+    (1, 0, 1, 1): 2,
+    (0, 1, 1, 1): 3,
+    (1, 0.5, 0, 1): 3,
+}
+
 # -------------------------------- Utilities ----------------------------------
 
 def _search_paths(names):
@@ -1077,15 +1091,60 @@ class StartMenuScreen(Screen):
         layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
         play_btn = Button(text="Play", size_hint=(1, None), height=80)
         skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
+        markers_btn = Button(text="Markers", size_hint=(1, None), height=80)
         play_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "game"))
         skins_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "skins"))
+        markers_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "markers"))
         layout.add_widget(play_btn)
         layout.add_widget(skins_btn)
+        layout.add_widget(markers_btn)
         self.add_widget(layout)
 
     def _update_bg_rect(self, *args):
         self._bg_rect.pos = self.pos
         self._bg_rect.size = self.size
+
+
+class BallMarkerMenuScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.app = App.get_running_app()
+        root = BoxLayout(orientation="vertical", padding=20, spacing=20)
+        self.marker_label = Label(text="", size_hint=(1, None), height=40)
+        root.add_widget(self.marker_label)
+        self.grid = GridLayout(cols=4, spacing=10, size_hint=(1, None), height=200)
+        root.add_widget(self.grid)
+        back_btn = Button(text="Back", size_hint=(1, None), height=60)
+        back_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "start"))
+        root.add_widget(back_btn)
+        self.add_widget(root)
+
+    def on_pre_enter(self, *args):
+        self.refresh()
+
+    def refresh(self):
+        self.marker_label.text = f"Markers: {self.app.markers}"
+        self.grid.clear_widgets()
+        for col, cost in available_colors.items():
+            btn = Button(background_normal="", background_color=col)
+            if col in self.app.owned_colors:
+                btn.text = "Owned"
+                btn.disabled = True
+            elif self.app.markers >= cost:
+                btn.text = f"Buy {cost}"
+                btn.bind(on_release=lambda _btn, color=col: self.buy_color(color))
+            else:
+                btn.text = f"{cost}"
+                btn.disabled = True
+            self.grid.add_widget(btn)
+
+    def buy_color(self, color):
+        cost = available_colors[color]
+        if color not in self.app.owned_colors and self.app.markers >= cost:
+            self.app.markers -= cost
+            self.app.owned_colors.append(color)
+            self.app.save_config()
+            self.refresh()
 
 
 class SkinMenuScreen(Screen):
@@ -1096,21 +1155,8 @@ class SkinMenuScreen(Screen):
         self.preview = Widget(size_hint=(1, None), height=120)
         self.preview.bind(pos=self._draw_preview, size=self._draw_preview)
         root.add_widget(self.preview)
-        self.colors = [
-            (1, 0, 0, 1),
-            (0, 1, 0, 1),
-            (0, 0, 1, 1),
-            (1, 1, 0, 1),
-            (1, 0, 1, 1),
-            (0, 1, 1, 1),
-            (1, 0.5, 0, 1),
-        ]
-        grid = GridLayout(cols=4, spacing=10, size_hint=(1, None), height=200)
-        for c in self.colors:
-            btn = Button(background_normal="", background_color=c)
-            btn.bind(on_release=lambda _btn, col=c: self.select_color(col))
-            grid.add_widget(btn)
-        root.add_widget(grid)
+        self.grid = GridLayout(cols=4, spacing=10, size_hint=(1, None), height=200)
+        root.add_widget(self.grid)
         btn_box = BoxLayout(size_hint=(1, None), height=60, spacing=10)
         back_btn = Button(text="Back")
         ok_btn = Button(text="OK")
@@ -1123,7 +1169,16 @@ class SkinMenuScreen(Screen):
 
     def on_pre_enter(self, *args):
         self.original_color = self.app.selected_color
+        self.refresh_colors()
         self._draw_preview()
+
+    def refresh_colors(self):
+        self.grid.clear_widgets()
+        colors = [(0.95, 0.95, 0.95, 1)] + list(self.app.owned_colors)
+        for c in colors:
+            btn = Button(background_normal="", background_color=c)
+            btn.bind(on_release=lambda _btn, col=c: self.select_color(col))
+            self.grid.add_widget(btn)
 
     def select_color(self, color):
         self.app.selected_color = color
@@ -1139,7 +1194,7 @@ class SkinMenuScreen(Screen):
             Ellipse(pos=(x, y), size=(size, size))
 
     def on_ok(self, *args):
-        self.app.save_selected_color()
+        self.app.save_config()
         self.manager.current = "start"
 
     def on_back(self, *args):
@@ -1164,22 +1219,35 @@ class StealthGolfApp(App):
         super().__init__(**kwargs)
         self.config_path = os.path.join(os.path.dirname(__file__), "skin_config.json")
         self.selected_color = (0.95, 0.95, 0.95, 1)
-        self._load_selected_color()
+        self.markers = 0
+        self.owned_colors = []
+        self._load_config()
 
-    def _load_selected_color(self):
+    def _load_config(self):
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             col = data.get("selected_color")
             if isinstance(col, (list, tuple)) and len(col) in (3, 4):
                 self.selected_color = tuple(col)
+            self.markers = data.get("markers", self.markers)
+            self.owned_colors = [tuple(c) for c in data.get("owned_colors", [])]
+            if self.selected_color not in [(0.95, 0.95, 0.95, 1)] + self.owned_colors:
+                self.selected_color = (0.95, 0.95, 0.95, 1)
         except Exception:
             pass
 
-    def save_selected_color(self):
+    def save_config(self):
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump({"selected_color": self.selected_color}, f)
+                json.dump(
+                    {
+                        "selected_color": self.selected_color,
+                        "markers": self.markers,
+                        "owned_colors": self.owned_colors,
+                    },
+                    f,
+                )
         except Exception:
             pass
 
@@ -1187,6 +1255,7 @@ class StealthGolfApp(App):
         sm = ScreenManager()
         sm.add_widget(StartMenuScreen(name="start"))
         sm.add_widget(SkinMenuScreen(name="skins"))
+        sm.add_widget(BallMarkerMenuScreen(name="markers"))
         sm.add_widget(GameScreen(name="game"))
         return sm
 
