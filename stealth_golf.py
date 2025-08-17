@@ -1076,16 +1076,49 @@ class StartMenuScreen(Screen):
 
         layout = BoxLayout(orientation="vertical", padding=40, spacing=20)
         play_btn = Button(text="Play", size_hint=(1, None), height=80)
+        self.markers_btn = Button(
+            size_hint=(1, None),
+            height=80,
+            text="0",
+            background_normal="",
+            background_color=(0, 0, 0, 0),
+            color=(0, 0, 0, 1),
+        )
         skins_btn = Button(text="Skins", size_hint=(1, None), height=80)
+
         play_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "game"))
+        self.markers_btn.bind(
+            on_release=lambda *_: setattr(self.manager, "current", "BallMarkers")
+        )
         skins_btn.bind(on_release=lambda *_: setattr(self.manager, "current", "skins"))
+
+        with self.markers_btn.canvas.before:
+            Color(1, 0.84, 0, 1)
+            self._marker_circle = Ellipse()
+        self.markers_btn.bind(pos=self._update_marker_btn, size=self._update_marker_btn)
+        self._update_marker_btn()
+
         layout.add_widget(play_btn)
+        layout.add_widget(self.markers_btn)
         layout.add_widget(skins_btn)
         self.add_widget(layout)
 
     def _update_bg_rect(self, *args):
         self._bg_rect.pos = self.pos
         self._bg_rect.size = self.size
+
+    def _update_marker_btn(self, *args):
+        btn = self.markers_btn
+        size = btn.height * 0.6
+        self._marker_circle.size = (size, size)
+        self._marker_circle.pos = (
+            btn.center_x - size / 2,
+            btn.center_y - size / 2,
+        )
+
+    def on_pre_enter(self, *args):
+        app = App.get_running_app()
+        self.markers_btn.text = str(getattr(app, "marker_count", 0))
 
 
 class SkinMenuScreen(Screen):
