@@ -14,6 +14,7 @@
     "r": 22
   },
   "hole_floor": 0,
+  "stars": {"three": 6, "two": 10, "one": 11},
   "floors": [
     {
       "walls": [
