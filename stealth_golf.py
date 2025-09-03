@@ -499,7 +499,6 @@ class StealthGolf(Widget):
             self.level_index = 1
 
         self._apply_level_data(data)
-        self.score_box = None
 
         # Previous floor visuals and cross-fade progress
         self.prev_walls = []
@@ -541,16 +540,6 @@ class StealthGolf(Widget):
         hole = data.get("hole", {"cx": 1240, "cy": 2020, "r": 22})
         self.hole = (int(hole["cx"]), int(hole["cy"]), int(hole.get("r", 22)))
         self.hole_floor = int(data.get("hole_floor", 0))
-
-        # Stroke and star state
-        self.star_thresholds = data.get(
-            "stars", {"three": 6, "two": 10, "one": 11}
-        )
-        self.stroke_count = 0
-        self.star_count = 0
-        if hasattr(self, "score_box") and self.score_box:
-            self.remove_widget(self.score_box)
-            self.score_box = None
 
         if "floors" in data:
             self.floors = data["floors"]
@@ -680,7 +669,6 @@ class StealthGolf(Widget):
             "start_floor": 0,
             "hole": {"cx": 1240, "cy": 2020, "r": 22},
             "hole_floor": 0,
-            "stars": {"three": 6, "two": 10, "one": 11},
             "floors": [
                 {
                     "walls": [
@@ -714,7 +702,7 @@ class StealthGolf(Widget):
                 self.level_index = idx
                 self._apply_level_data(data)
                 # Reset state for new level
-                self.caught=False; self.win=False; self.message_timer=0.0
+                self.caught=False; self.win=False; self.message_timer=1.5
                 self.drop_timer=0.0
                 return True
         print("No further levels found up to", MAX_LEVEL_INDEX)
@@ -741,12 +729,14 @@ class StealthGolf(Widget):
 
     # ------------- Input -------------
     def on_touch_down(self, touch):
-        if self.caught:
-            self._reset_to_start()
+        if self.caught or self.win:
+            if self.win and self.drop_timer <= 0:
+                # If win banner is shown after drop, try autoload next level
+                if not self._try_load_next_level():
+                    self._reset_to_start()
+            else:
+                self._reset_to_start()
             return True
-        if self.win:
-            # Let score screen widgets handle the touch
-            return False
         wx, wy = self.screen_to_world(touch.x, touch.y)
         if length(wx - self.ball.x, wy - self.ball.y) <= self.ball.r + 36 and not self.ball.in_motion:
             self.aiming=True; self.aim_touch_id=touch.uid; self.aim_start=(wx,wy); self.aim_current=(wx,wy); return True
@@ -766,7 +756,6 @@ class StealthGolf(Widget):
                 ix, iy = normalize(ix, iy); ix*=self.max_shot; iy*=self.max_shot
             scale = 1.90
             self.ball.apply_impulse(ix*scale, iy*scale)
-            self.stroke_count += 1
             self.aiming=False; self.aim_touch_id=None; return True
         return False
 
@@ -832,10 +821,8 @@ class StealthGolf(Widget):
                     and not self.win
                     and length(self.ball.x - cx, self.ball.y - cy) <= (hr - 2)
                 ):
-                    self.win = True
+                    self.win = True; self.drop_timer = 0.9; self.message_timer = 1.6
                     self.ball.vx = self.ball.vy = 0.0; self.ball.in_motion = False
-                    self.star_count = self._compute_stars()
-                    self._show_score_screen()
                 # stairs
                 if not self.win and not self.caught:
                     currently_on_stairs = False
@@ -1065,19 +1052,13 @@ class StealthGolf(Widget):
         if not hasattr(self, "banner"):
             self.banner = Label(text="", font_size=20, color=(1,1,1,1), size_hint=(None,None), size=(self.width,40), pos=(10, self.height - 90))
             self.add_widget(self.banner)
-        if not hasattr(self, "stroke_label"):
-            self.stroke_label = Label(
-                text="Strokes: 0",
-                font_size=20,
-                color=(1, 1, 1, 1),
-                size_hint=(None, None),
-                size=(120, 40),
-                pos=(self.width - 130, self.height - 40),
-            )
-            self.add_widget(self.stroke_label)
-        self.stroke_label.text = f"Strokes: {self.stroke_count}"
         if self.caught and self.message_timer > 0:
             self.banner.text = "[b]Caught![/b] Tap to restart."; self.banner.markup=True
+            self.message_timer = max(0.0, self.message_timer - 1/60)
+        elif self.win and self.drop_timer > 0:
+            self.banner.text = "Dropping to next level..."; self.banner.markup=True
+        elif self.win and self.drop_timer <= 0 and self.message_timer > 0:
+            self.banner.text = "[b]Level complete![/b] • Loading next (if present)…"; self.banner.markup=True
             self.message_timer = max(0.0, self.message_timer - 1/60)
         else:
             self.banner.text = ""
@@ -1092,11 +1073,6 @@ class StealthGolf(Widget):
         self.ball.vx = self.ball.vy = 0.0
         self.ball.smoke_timer = 0.0
         self.caught = False; self.win=False; self.drop_timer=0.0; self.message_timer=0.0
-        self.stroke_count = 0
-        self.star_count = 0
-        if hasattr(self, "score_box") and self.score_box:
-            self.remove_widget(self.score_box)
-            self.score_box = None
         self.on_stairs = False
         self.hacking_door = None
         self.hack_timer = 0.0
@@ -1113,44 +1089,6 @@ class StealthGolf(Widget):
                     self.colliders.append(rect)
         for a in self.agents:
             a.x,a.y = a.ax,a.ay; a.dir=1; a.chasing=False; a.look_dirx, a.look_diry = normalize(a.bx-a.ax, a.by-a.ay)
-
-    def _compute_stars(self):
-        three = self.star_thresholds.get("three", 6)
-        two = self.star_thresholds.get("two", 10)
-        one = self.star_thresholds.get("one", 11)
-        if self.stroke_count <= three:
-            return 3
-        elif self.stroke_count <= two:
-            return 2
-        elif self.stroke_count >= one:
-            return 1
-        else:
-            return 0
-
-    def _show_score_screen(self):
-        stars_text = "★" * self.star_count + "☆" * (3 - self.star_count)
-        box = BoxLayout(
-            orientation="vertical",
-            padding=20,
-            spacing=20,
-            size_hint=(None, None),
-            size=(300, 200),
-            pos=(self.width / 2 - 150, self.height / 2 - 100),
-        )
-        label = Label(text=stars_text, font_size=48, color=(1, 1, 1, 1))
-        btn = Button(text="Next Level", size_hint=(1, None), height=50)
-        btn.bind(on_release=self._next_level)
-        box.add_widget(label)
-        box.add_widget(btn)
-        self.add_widget(box)
-        self.score_box = box
-
-    def _next_level(self, *args):
-        if hasattr(self, "score_box") and self.score_box:
-            self.remove_widget(self.score_box)
-            self.score_box = None
-        if not self._try_load_next_level():
-            self._next_level_banner()
 
 # ----------------------------- Screens & App ---------------------------------
 
